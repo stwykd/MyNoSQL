@@ -1,14 +1,25 @@
 package raft
 
-// Raft Consensus Algorithm implemented as of paper https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf
+import (
+	"net/rpc"
+	"sync"
+	"time"
+)
 
-type LogEntry struct {
-	Index int
-	Term  int
-	Command  interface{}
-}
+// Raft Consensus Algorithm implemented as a library
+// https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf
 
-type State struct { // State from Figure 2 of paper
+// State for a single Raft server
+type State struct {
+	me int // id of this Raft server
+	cluster []*rpc.Client // RPC endpoint of each server in Raft cluster (including this one)
+	mu sync.Mutex // mutex to protect shared access and ensure visibility
+	electionTimer *time.Timer // time to wait before starting election
+	role Role // role of this Raft server
+	doneCh chan DoneMsg // communicate back to Raft client when a command is committed into log
+	logIndex int // log index where to store next log entry
+
+	// State from Figure 2 of paper
 	// Persistent state on all servers
 	currentTerm int // latest term server has seen (initialized to 0 on first boot, increases monotonically)
 	votedFor int // candidateId that received vote in current term (or null if none)
@@ -23,3 +34,4 @@ type State struct { // State from Figure 2 of paper
 	nextIndex []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
 	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
+
