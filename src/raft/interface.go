@@ -14,13 +14,13 @@ type AppendEntriesArgs struct {
 }
 
 // AppendEntriesReply results from AppendEntry() RPC
-type AppendEntriesResults struct {
+type AppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
 }
 
 // AppendEntries is invoked by leader to replicate log entries; also used as heartbeat.
-func (r *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesResults) {
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// TODO
 }
 
@@ -32,43 +32,27 @@ type RequestVoteArgs struct {
 	LastLogTerm  int // term of candidate’s last log entry
 }
 
-// AppendEntriesResp results from AppendEntry() RPC
-type RequestVoteResults struct {
+// AppendEntriesReply results from AppendEntry() RPC
+type RequestVoteReply struct {
 	Term        int  // currentTerm, for candidate to update itself
 	VoteGranted bool // true means candidate received vote
 }
 
 // RequestVote is invoked by candidates to gather votes
-func (r *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteResults) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.currentTerm == args.Term && r.votedFor == args.CandidateId {
-		reply.VoteGranted, reply.Term = true, r.currentTerm
-		return
+func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if args.Term > rf.currentTerm {
+		rf.toFollower(args.Term)
 	}
-	if r.currentTerm > args.Term || // valid candidate
-		(r.currentTerm == args.Term && r.votedFor != -1) { // the server has voted in this term
-		reply.Term, reply.VoteGranted = r.currentTerm, false
-		return
-	}
-	if args.Term > r.currentTerm {
-		r.currentTerm, r.votedFor = args.Term, -1
-		if r.role != Follower { // once server becomes follower, it has to reset timer
-			r.timer = randElectionTimer()
-			r.role = Follower
-		}
-	}
-	r.leader = -1 // other server trying to elect a new leader
-	reply.Term = args.Term
-	lastLogIndex := r.logIndex - 1
-	lastLogTerm := r.log[lastLogIndex].Term
-	if lastLogTerm > args.LastLogTerm || // the server has log with higher term
-		(lastLogTerm == args.LastLogTerm && lastLogIndex > args.LastLogIndex) { // under same term, this server has longer index
+
+	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.CandidateId) {
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
+	} else {
 		reply.VoteGranted = false
-		return
 	}
-	reply.VoteGranted = true
-	r.votedFor = args.CandidateId
-	r.timer = randElectionTimer() // granting vote to candidate, reset timer
-	r.saveState()
+	reply.Term = rf.currentTerm
+	return nil
 }
