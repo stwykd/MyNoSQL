@@ -7,15 +7,15 @@ import (
 	"log"
 )
 
-func (r *Raft) encode() []byte {
+func (rf *Raft) encode() []byte {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
-	if e.Encode(r.currentTerm) != nil ||
-		e.Encode(r.votedFor) != nil ||
-		e.Encode(r.logIndex) != nil ||
-		e.Encode(r.commitIndex) != nil ||
-		e.Encode(r.lastApplied) != nil ||
-		e.Encode(r.log) != nil {
+	if e.Encode(rf.currentTerm) != nil ||
+		e.Encode(rf.votedFor) != nil ||
+		e.Encode(rf.logIndex) != nil ||
+		e.Encode(rf.commitIndex) != nil ||
+		e.Encode(rf.lastApplied) != nil ||
+		e.Encode(rf.log) != nil {
 		log.Fatal("error while marshaling raft state")
 	}
 
@@ -23,7 +23,7 @@ func (r *Raft) encode() []byte {
 	return data
 }
 
-func (r *Raft) decode(data []byte) {
+func (rf *Raft) decode(data []byte) {
 	if data == nil || len(data) == 0 {
 		return
 	}
@@ -34,18 +34,18 @@ func (r *Raft) decode(data []byte) {
 		d.Decode(&logIndex) != nil ||
 		d.Decode(&commitIndex) != nil ||
 		d.Decode(&lastApplied) != nil ||
-		d.Decode(&r.log) != nil {
+		d.Decode(&rf.log) != nil {
 		log.Fatal("error while unmarshaling raft state")
 	}
-	r.currentTerm, r.votedFor, r.logIndex, r.commitIndex, r.lastApplied =
+	rf.currentTerm, rf.votedFor, rf.logIndex, rf.commitIndex, rf.lastApplied =
 		currentTerm, votedFor, logIndex, commitIndex, lastApplied
 }
 
-func (r *Raft) saveState() {
-	ioutil.WriteFile("raft_state", r.encode(), 0777)
+func (rf *Raft) saveState() {
+	ioutil.WriteFile("raft_state", rf.encode(), 0777)
 }
 
-func (r *Raft) loadState() {
+func (rf *Raft) loadState() {
 	data, _ := ioutil.ReadFile("raft_state")
-	r.decode(data)
+	rf.decode(data)
 }
