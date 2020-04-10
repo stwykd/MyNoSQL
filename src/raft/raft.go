@@ -11,13 +11,14 @@ import (
 
 // Raft for a single Raft server
 type Raft struct {
-	me          int           // id of this Raft server
-	leader      int           // id of leader
-	cluster     []*rpc.Client // RPC endpoint of each server in Raft cluster (including this one)
-	mu          sync.Mutex    // mutex to protect shared access and ensure visibility
-	timer       *time.Timer   // time to wait before starting election
-	state       State         // state of this Raft server
-	logIndex    int           // log index where to store next log entry
+	me            int           // id of this Raft server
+	leaderId      int           // id of leader
+	cluster       []*rpc.Client // RPC endpoint of each server in Raft cluster (including this one)
+	mu            sync.Mutex    // mutex to protect shared access and ensure visibility
+	timer         *time.Timer   // time to wait before starting election
+	state         State         // state of this Raft server
+	logIndex      int           // log index where to store next log entry
+	resetElection time.Time
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -31,37 +32,63 @@ type Raft struct {
 
 	// Volatile state on leaders
 	// Reinitialized after election
-	nextIndex    []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-	matchIndex   []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+	nextIndex  []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
-// New initializes a new Raft server as of Figure 2 of Raft paper
-func New(cluster []*rpc.Client, me int, doneCh chan DoneMsg) *Raft {
-	r := &Raft{}
-	r.cluster = cluster
-	r.me = me
-	r.leader = -1
-	r.currentTerm = 0
-	r.votedFor = -1
-	r.commitIndex = 0
-	r.lastApplied = 0
-	r.state = Follower              // all nodes start as follower
-	r.log = []LogEntry{{0, 0, nil}} // log entry at index 0 is unused
-	r.logIndex = 1
-	r.timer = randElectionTimer()
+// NewRaft initializes a new Raft server as of Figure 2 of Raft paper
+func NewRaft(cluster []*rpc.Client, me int, doneCh chan DoneMsg) *Raft {
+	rf := &Raft{}
+	rf.cluster = cluster
+	rf.me = me
+	rf.leaderId = -1
+	rf.currentTerm = 0
+	rf.votedFor = -1
+	rf.commitIndex = 0
+	rf.lastApplied = 0
+	rf.state = Follower              // all servers start as follower
+	rf.log = []LogEntry{{0, 0, nil}} // log entry at index 0 is unused
+	rf.logIndex = 1
+	rf.resetElection = time.Now()
 
-	r.loadState() // initialize from saved state before possible server crash
-	go r.runElectionTimer()
+	rf.loadState() // initialize from saved state before possible server crash
+	go rf.electionWait()
 
-	return r
+	return rf
 }
 
-// toFollower turns Raft server into follower
-// Expects r.mu to be acquired
-func (r *Raft) toFollower(term int) {
-	r.state = Follower
-	r.currentTerm = term
-	r.votedFor = -1
+// toFollower changes Raft server state to follower
+// Expects rf.mu to be acquired
+func (rf *Raft) toFollower(term int) {
+	rf.state = Follower
+	rf.currentTerm = term
+	rf.votedFor = -1
+	rf.resetElection = time.Now()
+	go rf.electionWait()
+}
 
-	go r.runElectionTimer()
+// heartbeat is run by leader. it sends heartbeats to each follower, collects
+// their replies and reverts to follower if any follower has higher term
+func (rf *Raft) heartbeat() {
+	rf.mu.Lock()
+	term := rf.currentTerm
+	rf.mu.Unlock()
+
+	for _, peer := range rf.cluster {
+		args := AppendEntriesArgs{
+			Term:     term,
+			LeaderId: rf.me,
+		}
+		go func(peer *rpc.Client) {
+			var reply AppendEntriesReply
+			if err := peer.Call("Raft.AppendEntries", args, &reply); err == nil {
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+				if reply.Term > term {
+					rf.toFollower(reply.Term)
+					return
+				}
+			}
+		}(peer)
+	}
 }
