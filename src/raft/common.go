@@ -1,5 +1,9 @@
 package raft
 
+import "time"
+
+const HeartbeatInterval = 100 * time.Millisecond
+
 // LogEntry is a single entry in a Raft server's log
 type LogEntry struct {
 	Index int
@@ -7,10 +11,10 @@ type LogEntry struct {
 	Command interface{}
 }
 
-// Role of a Raft server
-type Role int
+// State of a Raft server
+type State int
 const (
-	Leader Role = iota
+	Leader State = iota
 	Follower
 	Candidate
 )

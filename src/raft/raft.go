@@ -32,8 +32,8 @@ type Raft struct {
 
 	// Volatile state on leaders
 	// Reinitialized after election
-	nextIndex  []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+	nextIndex    []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+	matchIndex   []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
@@ -90,5 +90,22 @@ func (rf *Raft) heartbeat() {
 				}
 			}
 		}(peer)
+	}
+}
+
+// leader switches rf into a leader state and begins process of heartbeats.
+// Expects rf.mu to be locked.
+func (rf *Raft) leader() {
+	rf.state = Leader
+	timer := time.NewTimer(HeartbeatInterval)
+	for {
+		select {
+		case <-timer.C:
+			if rf.state != Leader {
+				return
+			}
+			rf.heartbeat()
+			timer.Reset(HeartbeatInterval)
+		}
 	}
 }
