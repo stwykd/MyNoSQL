@@ -1,6 +1,8 @@
 package raft
 
-// RPC interface exposed by each server
+import "time"
+
+// RPC interface exposed by each Raft server
 // See Figure 2 of paper
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
@@ -20,8 +22,25 @@ type AppendEntriesReply struct {
 }
 
 // AppendEntries is invoked by leader to replicate log entries; also used as heartbeat.
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	// TODO
+func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if args.Term > rf.currentTerm {
+		rf.toFollower(args.Term)
+	}
+
+	reply.Success = false
+	if args.Term == rf.currentTerm {
+		if rf.state != Follower {
+			rf.toFollower(args.Term)
+		}
+		rf.resetElection = time.Now()
+		reply.Success = true
+	}
+
+	reply.Term = rf.currentTerm
+	return nil
 }
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
@@ -50,6 +69,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.CandidateId) {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
+		rf.resetElection = time.Now()
 	} else {
 		reply.VoteGranted = false
 	}
