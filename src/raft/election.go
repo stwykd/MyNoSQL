@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"math/rand"
 	"net/rpc"
 	"sync/atomic"
@@ -17,25 +18,26 @@ func (rf *Raft) electionWait() {
 	rf.mu.Lock()
 	termStarted := rf.currentTerm
 	rf.mu.Unlock()
+	DPrintf("[%v] electionWait() started: timeout=%v term=%v", rf.me, waitTimeout, termStarted)
 
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-
 		rf.mu.Lock()
 		if rf.state != Candidate && rf.state != Follower {
+			fmt.Printf("[%v] waiting for election with state=%v, return", rf.me, rf.state)
 			rf.mu.Unlock()
 			return
 		}
 
 		if termStarted != rf.currentTerm {
+			fmt.Printf("[%v] while waiting for election, term changed from %d to %d, return",
+				rf.me, termStarted, rf.currentTerm)
 			rf.mu.Unlock()
 			return
 		}
 
-		// Start an election if we haven't heard from a leader or haven't voted for
-		// someone for the duration of the timeout.
 		if elapsed := time.Since(rf.resetElection); elapsed >= waitTimeout {
 			rf.election()
 			rf.mu.Unlock()
@@ -53,38 +55,43 @@ func (rf *Raft) election() {
 	savedCurrentTerm := rf.currentTerm
 	rf.resetElection = time.Now()
 	rf.votedFor = rf.me
+	fmt.Printf("[%v] started election and become Candidate at term %v", rf.me, savedCurrentTerm)
 
 	var votes int32 = 1
-	for _, peer := range rf.cluster {
-		go func(peer *rpc.Client) {
+	for id, peer := range rf.cluster {
+		go func(id int, peer *rpc.Client) {
 			args := RequestVoteArgs{
 				Term:        savedCurrentTerm,
 				CandidateId: rf.me,
 			}
-
+			fmt.Printf("[%v] sending RequestVote to %d: %+v", rf.me, id, args)
 			var reply RequestVoteReply
 			if err := peer.Call("Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
-
+				fmt.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
 				if rf.state != Candidate {
+					fmt.Printf("[%v] state changed to %v while waiting for RequestVoteReply", rf.me, rf.state)
 					return
 				}
 
 				if reply.Term > savedCurrentTerm {
+					fmt.Printf("[%v] RequestVoteReply.Term=%v while currentTerm=%v, returning",
+						rf.me, reply.Term, savedCurrentTerm)
 					rf.toFollower(reply.Term)
 					return
 				} else if reply.Term == savedCurrentTerm {
 					if reply.VoteGranted {
 						votes := int(atomic.AddInt32(&votes, 1))
 						if votes*2 > len(rf.cluster)+1 { // election won
-							rf.leader()
+							fmt.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
+							rf.toLeader()
 							return
 						}
 					}
 				}
 			}
-		}(peer)
+		}(id, peer)
 	}
 
 	// this election didn't produce a leader, call electionWait again

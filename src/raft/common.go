@@ -1,6 +1,8 @@
 package raft
 
-import "time"
+import (
+	"time"
+)
 
 const HeartbeatInterval = 100 * time.Millisecond
 

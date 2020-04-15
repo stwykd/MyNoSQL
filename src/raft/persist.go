@@ -3,6 +3,7 @@ package raft
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"io/ioutil"
 	"log"
 )
@@ -41,11 +42,19 @@ func (rf *Raft) decode(data []byte) {
 		currentTerm, votedFor, logIndex, commitIndex, lastApplied
 }
 
-func (rf *Raft) saveState() {
-	ioutil.WriteFile("raft_state", rf.encode(), 0777)
+func (rf *Raft) persist() {
+	err := ioutil.WriteFile("raft_state", rf.encode(), 0777)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("[%v] state persisted to disk", rf.me)
 }
 
-func (rf *Raft) loadState() {
-	data, _ := ioutil.ReadFile("raft_state")
+func (rf *Raft) recover() {
+	data, err := ioutil.ReadFile("raft_state")
+	if err != nil {
+		panic(err)
+	}
 	rf.decode(data)
+	fmt.Printf("[%v] state recovered from disk", rf.me)
 }

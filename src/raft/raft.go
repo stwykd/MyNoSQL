@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"net/rpc"
 	"sync"
 	"time"
@@ -51,15 +52,16 @@ func NewRaft(cluster []*rpc.Client, me int, doneCh chan DoneMsg) *Raft {
 	rf.logIndex = 1
 	rf.resetElection = time.Now()
 
-	rf.loadState() // initialize from saved state before possible server crash
+	rf.recover() // initialize from saved state before possible server crash
 	go rf.electionWait()
 
 	return rf
 }
 
 // toFollower changes Raft server state to follower
-// Expects rf.mu to be acquired
+// Expects rf.mu to be locked
 func (rf *Raft) toFollower(term int) {
+	fmt.Printf("[%v] becoming Follower with term=%v", rf.me, term)
 	rf.state = Follower
 	rf.currentTerm = term
 	rf.votedFor = -1
@@ -71,32 +73,36 @@ func (rf *Raft) toFollower(term int) {
 // their replies and reverts to follower if any follower has higher term
 func (rf *Raft) heartbeat() {
 	rf.mu.Lock()
-	term := rf.currentTerm
+	savedTerm := rf.currentTerm
 	rf.mu.Unlock()
 
-	for _, peer := range rf.cluster {
+	for id, peer := range rf.cluster {
 		args := AppendEntriesArgs{
-			Term:     term,
+			Term:     savedTerm,
 			LeaderId: rf.me,
 		}
-		go func(peer *rpc.Client) {
+		go func(id int, peer *rpc.Client) {
+			fmt.Printf("[%v] sending AppendEntries to %v: args=%+v", rf.me, id, args)
 			var reply AppendEntriesReply
 			if err := peer.Call("Raft.AppendEntries", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
-				if reply.Term > term {
+				if reply.Term > savedTerm {
+					fmt.Printf("[%v] received heartbeat reply with higher term, becoming follower",
+						rf.me)
 					rf.toFollower(reply.Term)
 					return
 				}
 			}
-		}(peer)
+		}(id, peer)
 	}
 }
 
-// leader switches rf into a leader state and begins process of heartbeats.
-// Expects rf.mu to be locked.
-func (rf *Raft) leader() {
+// toLeader changes Raft server into leader state and starts sending of heartbeats
+// Expects rf.mu to be locked
+func (rf *Raft) toLeader() {
 	rf.state = Leader
+	fmt.Printf("[%v] becoming Leader at term %v", rf.me, rf.currentTerm)
 	timer := time.NewTimer(HeartbeatInterval)
 	for {
 		select {

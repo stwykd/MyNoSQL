@@ -1,6 +1,9 @@
 package raft
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // RPC interface exposed by each Raft server
 // See Figure 2 of paper
@@ -25,8 +28,11 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	fmt.Printf("[%v] received AppendEntries: %+v", rf.me, args)
 
 	if args.Term > rf.currentTerm {
+		fmt.Printf("[%v] currentTerm=%d out of date with AppendEntriesArgs.Term=%d",
+			rf.me, rf.currentTerm, args.Term)
 		rf.toFollower(args.Term)
 	}
 
@@ -40,6 +46,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	}
 
 	reply.Term = rf.currentTerm
+	fmt.Printf("AppendEntries reply: %+v", reply)
 	return nil
 }
 
@@ -61,8 +68,12 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	fmt.Printf("[%v] received RequestVote: %+v [currentTerm=%d, votedFor=%d]",
+		rf.me, args, rf.currentTerm, rf.votedFor)
 
 	if args.Term > rf.currentTerm {
+		fmt.Printf("[%v] currentTerm=%d out of date with RequestVoteArgs.Term=%d",
+			rf.me, rf.currentTerm, args.Term)
 		rf.toFollower(args.Term)
 	}
 
@@ -74,5 +85,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		reply.VoteGranted = false
 	}
 	reply.Term = rf.currentTerm
+
+	fmt.Printf("[%v] RequestVoteReply: %+v", rf.me, reply)
 	return nil
 }
