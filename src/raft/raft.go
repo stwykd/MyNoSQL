@@ -12,14 +12,14 @@ import (
 
 // Raft for a single Raft server
 type Raft struct {
-	me            int           // id of this Raft server
-	leaderId      int           // id of leader
-	cluster       []*rpc.Client // RPC endpoint of each server in Raft cluster (including this one)
-	mu            sync.Mutex    // mutex to protect shared access and ensure visibility
-	timer         *time.Timer   // time to wait before starting election
-	state         State         // state of this Raft server
-	logIndex      int           // log index where to store next log entry
-	resetElection time.Time
+	me            int         // id of this Raft server
+	leaderId      int         // id of leader
+	cluster       Cluster     // endpoint of each other server in Raft cluster (excluding this one)
+	mu            sync.Mutex  // mutex to protect shared access and ensure visibility
+	timer         *time.Timer // time to wait before starting election
+	state         State       // state of this Raft server
+	logIndex      int         // log index where to store next log entry
+	resetElection time.Time   // time (used by follower) to wait before starting election
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -38,7 +38,7 @@ type Raft struct {
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(cluster []*rpc.Client, me int, doneCh chan DoneMsg) *Raft {
+func NewRaft(cluster Cluster, me int, doneCh chan DoneMsg) *Raft {
 	rf := &Raft{}
 	rf.cluster = cluster
 	rf.me = me

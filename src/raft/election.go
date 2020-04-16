@@ -67,16 +67,23 @@ func (rf *Raft) election() {
 			}
 			log.Printf("[%v] sending RequestVote to %d: %+v", rf.me, id, args)
 			var reply RequestVoteReply
+			// blocking RPC call
 			if err := peer.Call("Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
 				if rf.state != Candidate {
-					log.Printf("[%v] state changed to %v while waiting for RequestVoteReply", rf.me, rf.state)
+					// might have won election already because there were enough votes from
+					// the other concurrent RequestVote calls issued, or one reply had higher
+					// term, and switched back to Follower. return from election
+					log.Printf("[%v] state changed to %v while waiting for RequestVoteReply",
+						rf.me, rf.state)
 					return
 				}
 
 				if reply.Term > savedCurrentTerm {
+					// reply term higher than saved term. this can happen if another candidate won
+					// an election while we were collecting votes
 					log.Printf("[%v] RequestVoteReply.Term=%v while currentTerm=%v, returning",
 						rf.me, reply.Term, savedCurrentTerm)
 					rf.toFollower(reply.Term)

@@ -7,6 +7,8 @@ import (
 
 // RPC interface exposed by each Raft server
 // See Figure 2 of paper
+// RPC calls can take a long while to arrive - when replying, the code may have moved on
+// and it's important to gracefully give up in such cases.
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type AppendEntriesArgs struct {

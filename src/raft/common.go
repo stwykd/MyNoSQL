@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"net/rpc"
 	"time"
 )
 
@@ -27,3 +28,6 @@ type DoneMsg struct {
 	Term  int
 	Command interface{}
 }
+
+// Cluster is a map from server id to RPC endpoint
+type Cluster map[int]*rpc.Client
