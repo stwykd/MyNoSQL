@@ -1,14 +1,14 @@
 package raft
 
 import (
-	"fmt"
+	"log"
 	"math/rand"
 	"net/rpc"
 	"sync/atomic"
 	"time"
 )
 
-
+// range suggested in paper
 const minElectionWait, maxElectionWait = 150, 300
 
 // electionWait starts a timer towards becoming a candidate in a new election.
@@ -26,13 +26,13 @@ func (rf *Raft) electionWait() {
 		<-ticker.C
 		rf.mu.Lock()
 		if rf.state != Candidate && rf.state != Follower {
-			fmt.Printf("[%v] waiting for election with state=%v, return", rf.me, rf.state)
+			log.Printf("[%v] waiting for election with state=%v, return", rf.me, rf.state)
 			rf.mu.Unlock()
 			return
 		}
 
 		if termStarted != rf.currentTerm {
-			fmt.Printf("[%v] while waiting for election, term changed from %d to %d, return",
+			log.Printf("[%v] while waiting for election, term changed from %d to %d, return",
 				rf.me, termStarted, rf.currentTerm)
 			rf.mu.Unlock()
 			return
@@ -54,9 +54,10 @@ func (rf *Raft) election() {
 	rf.currentTerm++
 	savedCurrentTerm := rf.currentTerm
 	rf.resetElection = time.Now()
-	rf.votedFor = rf.me
-	fmt.Printf("[%v] started election and become Candidate at term %v", rf.me, savedCurrentTerm)
+	log.Printf("[%v] started election and become Candidate at term %v", rf.me, savedCurrentTerm)
 
+	// candidate votes for itself
+	rf.votedFor = rf.me
 	var votes int32 = 1
 	for id, peer := range rf.cluster {
 		go func(id int, peer *rpc.Client) {
@@ -64,19 +65,19 @@ func (rf *Raft) election() {
 				Term:        savedCurrentTerm,
 				CandidateId: rf.me,
 			}
-			fmt.Printf("[%v] sending RequestVote to %d: %+v", rf.me, id, args)
+			log.Printf("[%v] sending RequestVote to %d: %+v", rf.me, id, args)
 			var reply RequestVoteReply
 			if err := peer.Call("Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
-				fmt.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
+				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
 				if rf.state != Candidate {
-					fmt.Printf("[%v] state changed to %v while waiting for RequestVoteReply", rf.me, rf.state)
+					log.Printf("[%v] state changed to %v while waiting for RequestVoteReply", rf.me, rf.state)
 					return
 				}
 
 				if reply.Term > savedCurrentTerm {
-					fmt.Printf("[%v] RequestVoteReply.Term=%v while currentTerm=%v, returning",
+					log.Printf("[%v] RequestVoteReply.Term=%v while currentTerm=%v, returning",
 						rf.me, reply.Term, savedCurrentTerm)
 					rf.toFollower(reply.Term)
 					return
@@ -84,12 +85,14 @@ func (rf *Raft) election() {
 					if reply.VoteGranted {
 						votes := int(atomic.AddInt32(&votes, 1))
 						if votes*2 > len(rf.cluster)+1 { // election won
-							fmt.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
+							log.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
 							rf.toLeader()
 							return
 						}
 					}
 				}
+			} else {
+				log.Printf("[%v] error during RequestVote RPC: %s", rf.me, err.Error())
 			}
 		}(id, peer)
 	}

@@ -3,7 +3,6 @@ package raft
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
 	"io/ioutil"
 	"log"
 )
@@ -17,7 +16,7 @@ func (rf *Raft) encode() []byte {
 		e.Encode(rf.commitIndex) != nil ||
 		e.Encode(rf.lastApplied) != nil ||
 		e.Encode(rf.log) != nil {
-		log.Fatal("error while marshaling raft state")
+		log.Fatalf("[%v] error while marshaling raft state", rf.me)
 	}
 
 	data := w.Bytes()
@@ -36,7 +35,7 @@ func (rf *Raft) decode(data []byte) {
 		d.Decode(&commitIndex) != nil ||
 		d.Decode(&lastApplied) != nil ||
 		d.Decode(&rf.log) != nil {
-		log.Fatal("error while unmarshaling raft state")
+		log.Fatalf("[%v] error while marshaling raft state", rf.me)
 	}
 	rf.currentTerm, rf.votedFor, rf.logIndex, rf.commitIndex, rf.lastApplied =
 		currentTerm, votedFor, logIndex, commitIndex, lastApplied
@@ -45,16 +44,16 @@ func (rf *Raft) decode(data []byte) {
 func (rf *Raft) persist() {
 	err := ioutil.WriteFile("raft_state", rf.encode(), 0777)
 	if err != nil {
-		panic(err)
+		log.Fatalf("[%v] error while persisting raft state: %s", rf.me, err.Error())
 	}
-	fmt.Printf("[%v] state persisted to disk", rf.me)
+	log.Printf("[%v] state persisted to disk", rf.me)
 }
 
 func (rf *Raft) recover() {
 	data, err := ioutil.ReadFile("raft_state")
 	if err != nil {
-		panic(err)
+		log.Fatalf("[%v] error while recovering raft state: %s", rf.me, err.Error())
 	}
 	rf.decode(data)
-	fmt.Printf("[%v] state recovered from disk", rf.me)
+	log.Printf("[%v] state recovered from disk", rf.me)
 }

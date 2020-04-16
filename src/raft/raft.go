@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"fmt"
+	"log"
 	"net/rpc"
 	"sync"
 	"time"
@@ -61,7 +61,7 @@ func NewRaft(cluster []*rpc.Client, me int, doneCh chan DoneMsg) *Raft {
 // toFollower changes Raft server state to follower
 // Expects rf.mu to be locked
 func (rf *Raft) toFollower(term int) {
-	fmt.Printf("[%v] becoming Follower with term=%v", rf.me, term)
+	log.Printf("[%v] becoming Follower with term=%v", rf.me, term)
 	rf.state = Follower
 	rf.currentTerm = term
 	rf.votedFor = -1
@@ -82,13 +82,13 @@ func (rf *Raft) heartbeat() {
 			LeaderId: rf.me,
 		}
 		go func(id int, peer *rpc.Client) {
-			fmt.Printf("[%v] sending AppendEntries to %v: args=%+v", rf.me, id, args)
+			log.Printf("[%v] sending AppendEntries to %v: args=%+v", rf.me, id, args)
 			var reply AppendEntriesReply
 			if err := peer.Call("Raft.AppendEntries", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				if reply.Term > savedTerm {
-					fmt.Printf("[%v] received heartbeat reply with higher term, becoming follower",
+					log.Printf("[%v] received heartbeat reply with higher term, becoming follower",
 						rf.me)
 					rf.toFollower(reply.Term)
 					return
@@ -102,7 +102,7 @@ func (rf *Raft) heartbeat() {
 // Expects rf.mu to be locked
 func (rf *Raft) toLeader() {
 	rf.state = Leader
-	fmt.Printf("[%v] becoming Leader at term %v", rf.me, rf.currentTerm)
+	log.Printf("[%v] becoming Leader at term %v", rf.me, rf.currentTerm)
 	timer := time.NewTimer(HeartbeatInterval)
 	for {
 		select {
