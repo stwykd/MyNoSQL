@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const HeartbeatInterval = 100 * time.Millisecond
+const HeartbeatInterval = 50 * time.Millisecond
 
 // LogEntry is a single entry in a Raft server's log
 type LogEntry struct {

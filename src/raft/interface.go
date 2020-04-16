@@ -14,10 +14,10 @@ import (
 type AppendEntriesArgs struct {
 	Term         int        // leader's term
 	LeaderId     int        // so follower can redirect clients
-	PrevLogIndex int        // index log index of log entry immediately preceding new ones
-	PrevLogTerm  int        // term of prevLogIndex entry
-	Entries      []LogEntry // log entries to store (empty for heartbeat; may send more than one for efficiency)
-	LeaderCommit int        // leader’s commitIndex
+	//PrevLogIndex int        // index log index of log entry immediately preceding new ones
+	//PrevLogTerm  int        // term of prevLogIndex entry
+	//Entries      []LogEntry // log entries to store (empty for heartbeat; may send more than one for efficiency)
+	//LeaderCommit int        // leader’s commitIndex
 }
 
 // AppendEntriesReply results from AppendEntry() RPC
@@ -40,6 +40,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 	reply.Success = false
 	if args.Term == rf.currentTerm {
+		// two leaders can't coexist. if Raft server receives AppendEntries() RPC, another
+		// leader already exists in this term
 		if rf.state != Follower {
 			rf.toFollower(args.Term)
 		}
@@ -48,7 +50,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	}
 
 	reply.Term = rf.currentTerm
-	log.Printf("AppendEntries reply: %+v", reply)
+	log.Printf("[%v] AppendEntriesReply sent: %+v", rf.me, reply)
 	return nil
 }
 
@@ -56,8 +58,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 type RequestVoteArgs struct {
 	Term         int // candidate's term
 	CandidateId  int // candidate requesting vote
-	LastLogIndex int // index of candidate’s last log entry
-	LastLogTerm  int // term of candidate’s last log entry
+	//LastLogIndex int // index of candidate’s last log entry
+	//LastLogTerm  int // term of candidate’s last log entry
 }
 
 // AppendEntriesReply results from AppendEntry() RPC
@@ -74,8 +76,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		rf.me, args, rf.currentTerm, rf.votedFor)
 
 	if args.Term > rf.currentTerm {
-		log.Printf("[%v] currentTerm=%d out of date with RequestVoteArgs.Term=%d",
-			rf.me, rf.currentTerm, args.Term)
+		// server in past term, revert to follower (and reset its state)
+		log.Printf("[%v] RequestVoteArgs.Term=%d bigger than currentTerm=%d",
+			rf.me, args.Term, rf.currentTerm)
 		rf.toFollower(args.Term)
 	}
 

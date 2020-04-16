@@ -18,7 +18,8 @@ func (rf *Raft) electionWait() {
 	rf.mu.Lock()
 	termStarted := rf.currentTerm
 	rf.mu.Unlock()
-	DPrintf("[%v] electionWait() started: timeout=%v term=%v", rf.me, waitTimeout, termStarted)
+	log.Printf("[%v] electionWait() started: timeout=%v term=%v",
+		rf.me, waitTimeout, termStarted)
 
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -26,7 +27,9 @@ func (rf *Raft) electionWait() {
 		<-ticker.C
 		rf.mu.Lock()
 		if rf.state != Candidate && rf.state != Follower {
-			log.Printf("[%v] waiting for election with state=%v, return", rf.me, rf.state)
+			// concurrently running election() made this server a leader already
+			log.Printf("[%v] waiting for election with state=%v instead of follower, return",
+				rf.me, rf.state)
 			rf.mu.Unlock()
 			return
 		}
@@ -91,7 +94,9 @@ func (rf *Raft) election() {
 				} else if reply.Term == savedCurrentTerm {
 					if reply.VoteGranted {
 						votes := int(atomic.AddInt32(&votes, 1))
-						if votes*2 > len(rf.cluster)+1 { // election won
+						if votes > (len(rf.cluster)+1)/2 {
+							// election won. become leader
+							// remaining goroutines will notice state != candidate and return
 							log.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
 							rf.toLeader()
 							return

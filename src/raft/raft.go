@@ -58,7 +58,7 @@ func NewRaft(cluster Cluster, me int, doneCh chan DoneMsg) *Raft {
 	return rf
 }
 
-// toFollower changes Raft server state to follower
+// toFollower changes Raft server state to follower and resets its state
 // Expects rf.mu to be locked
 func (rf *Raft) toFollower(term int) {
 	log.Printf("[%v] becoming Follower with term=%v", rf.me, term)
