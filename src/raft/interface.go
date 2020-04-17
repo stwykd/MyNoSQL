@@ -31,7 +31,9 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	log.Printf("[%v] received AppendEntries: %+v", rf.me, args)
-
+	if rf.state == Down {
+		return nil
+	}
 	if args.Term > rf.currentTerm {
 		log.Printf("[%v] currentTerm=%d out of date with AppendEntriesArgs.Term=%d",
 			rf.me, rf.currentTerm, args.Term)
@@ -74,7 +76,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 	defer rf.mu.Unlock()
 	log.Printf("[%v] received RequestVote: %+v [currentTerm=%d, votedFor=%d]",
 		rf.me, args, rf.currentTerm, rf.votedFor)
-
+	if rf.state == Down {
+		return nil
+	}
 	if args.Term > rf.currentTerm {
 		// server in past term, revert to follower (and reset its state)
 		log.Printf("[%v] RequestVoteArgs.Term=%d bigger than currentTerm=%d",

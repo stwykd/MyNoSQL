@@ -20,6 +20,7 @@ const (
 	Leader State = iota
 	Follower
 	Candidate
+	Down
 )
 
 // DoneMsg is sent back to Raft client after a requested command is committed

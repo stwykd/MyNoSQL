@@ -37,6 +37,14 @@ type Raft struct {
 	matchIndex   []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
+// Kill kills the this Raft server. Used for testing
+func (rf *Raft) Kill() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.state = Down
+	log.Printf("[%v] killed", rf.me)
+}
+
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
 func NewRaft(cluster Cluster, me int, doneCh chan DoneMsg) *Raft {
 	rf := &Raft{}
