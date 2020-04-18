@@ -3,8 +3,10 @@ package raft
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 )
 
 func (rf *Raft) encode() []byte {
@@ -50,10 +52,17 @@ func (rf *Raft) persist() {
 }
 
 func (rf *Raft) recover() {
-	data, err := ioutil.ReadFile("raft_state")
+	path := fmt.Sprintf("state/raft_state_%d", rf.me)
+	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0777)
 	if err != nil {
-		log.Fatalf("[%v] error while recovering raft state: %s", rf.me, err.Error())
+		log.Fatalf("[%v] error while opening file %s: %s", rf.me, path, err.Error())
 	}
-	rf.decode(data)
-	log.Printf("[%v] state recovered from disk", rf.me)
+	data, err := ioutil.ReadAll(f)
+	if err != nil {
+		log.Fatalf("[%v] error while reading file %s: %s", rf.me, path, err.Error())
+	}
+	if len(data) != 0 {
+		rf.decode(data)
+		log.Printf("[%v] state recovered from disk", rf.me)
+	}
 }
