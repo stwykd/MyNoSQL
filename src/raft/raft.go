@@ -14,7 +14,8 @@ import (
 type Raft struct {
 	me            int         // id of this Raft server
 	leaderId      int         // id of leader
-	cluster       Cluster     // endpoint of each other server in Raft cluster (excluding this one)
+	cluster       Cluster     // RPC clients of each other server in Raft cluster (excluding this one)
+	server		  *rpc.Server // RPC server listening for RPC calls
 	mu            sync.Mutex  // mutex to protect shared access and ensure visibility
 	timer         *time.Timer // time to wait before starting election
 	state         State       // state of this Raft server
@@ -37,19 +38,20 @@ type Raft struct {
 	matchIndex   []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
-// Kill kills the this Raft server. Used for testing
-func (rf *Raft) Kill() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.state = Down
-	log.Printf("[%v] killed", rf.me)
-}
+//// Stop stops the this Raft server. Used for testing
+//func (rf *Raft) Kill() {
+//	rf.mu.Lock()
+//	defer rf.mu.Unlock()
+//	rf.state = Down
+//	log.Printf("[%v] stopped", rf.me)
+//}
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(cluster Cluster, me int, doneCh chan DoneMsg) *Raft {
+func NewRaft(me int, cluster Cluster, server *rpc.Server) *Raft {
 	rf := &Raft{}
-	rf.cluster = cluster
 	rf.me = me
+	rf.cluster = cluster
+	rf.server = server
 	rf.leaderId = -1
 	rf.currentTerm = 0
 	rf.votedFor = -1
