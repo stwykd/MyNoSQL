@@ -13,9 +13,8 @@ import (
 // Raft for a single Raft server
 type Raft struct {
 	me            int         // id of this Raft server
-	leaderId      int         // id of leader
 	cluster       Cluster     // RPC clients of each other server in Raft cluster (excluding this one)
-	server		  *rpc.Server // RPC server listening for RPC calls
+	server        *rpc.Server // RPC server listening for RPC calls
 	mu            sync.Mutex  // mutex to protect shared access and ensure visibility
 	timer         *time.Timer // time to wait before starting election
 	state         State       // state of this Raft server
@@ -34,8 +33,8 @@ type Raft struct {
 
 	// Volatile state on leaders
 	// Reinitialized after election
-	nextIndex    []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-	matchIndex   []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+	nextIndex  []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
 //// Stop stops the this Raft server. Used for testing
@@ -52,7 +51,6 @@ func NewRaft(me int, cluster Cluster, server *rpc.Server) *Raft {
 	rf.me = me
 	rf.cluster = cluster
 	rf.server = server
-	rf.leaderId = -1
 	rf.currentTerm = 0
 	rf.votedFor = -1
 	rf.commitIndex = 0
@@ -71,7 +69,7 @@ func NewRaft(me int, cluster Cluster, server *rpc.Server) *Raft {
 // toFollower changes Raft server state to follower and resets its state
 // Expects rf.mu to be locked
 func (rf *Raft) toFollower(term int) {
-	log.Printf("[%v] becoming Follower with term=%v", rf.me, term)
+	log.Printf("[%v] becoming follower with term %v", rf.me, term)
 	rf.state = Follower
 	rf.currentTerm = term
 	rf.votedFor = -1

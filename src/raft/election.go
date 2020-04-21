@@ -14,7 +14,7 @@ const minElectionWait, maxElectionWait = 150, 300
 // electionWait starts a timer towards becoming a candidate in a new election.
 // it is run by a follower as long as it receives heartbeats
 func (rf *Raft) electionWait() {
-	waitTimeout := time.Duration(rand.Intn(maxElectionWait)-minElectionWait) * time.Millisecond
+	waitTimeout := time.Duration(rand.Intn(maxElectionWait-minElectionWait)+minElectionWait) * time.Millisecond
 	rf.mu.Lock()
 	termStarted := rf.currentTerm
 	rf.mu.Unlock()
@@ -68,7 +68,7 @@ func (rf *Raft) election() {
 				Term:        savedCurrentTerm,
 				CandidateId: rf.me,
 			}
-			log.Printf("[%v] sending RequestVote to %d: %+v", rf.me, id, args)
+			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, id, args)
 			var reply RequestVoteReply
 			// blocking RPC call
 			if err := peer.Call("Raft.RequestVote", args, &reply); err == nil {
