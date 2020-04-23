@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"sync"
+	"testing"
 )
 
 const BasePort = 30000
@@ -85,3 +86,21 @@ func setupRaftCluster(raftServers []*Raft, nServers int) {
 		raftServers[i] = NewRaft(i, getPeers(clients[i], i, nServers), servers[i])
 	}
 }
+
+func findLeader(raftServers[]*Raft, t *testing.T) (leader, term int) {
+	leader, term = -1, -1
+	for i, rf := range raftServers {
+		if rf.state == Leader {
+			if leader != -1 {
+				t.Fatalf("%d and %d are both leaders", rf.me, leader)
+			}
+			leader, term = raftServers[i].me, rf.currentTerm
+		}
+	}
+
+	if leader == -1 {
+		t.Fatalf("no leader elected")
+	}
+	return
+}
+
