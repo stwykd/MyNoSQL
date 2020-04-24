@@ -9,24 +9,25 @@ const HeartbeatInterval = 50 * time.Millisecond
 
 // LogEntry is a single entry in a Raft server's log
 type LogEntry struct {
-	Index int
-	Term  int
+	Index   int
+	Term    int
 	Command interface{}
 }
 
 // State of a Raft server
-type State int
+type State string
+
 const (
-	Leader State = iota
-	Follower
-	Candidate
-	Down
+	Leader    State = "leader"
+	Follower        = "follower"
+	Candidate       = "candidate"
+	Down            = "down"
 )
 
 // DoneMsg is sent back to Raft client after a requested command is committed
 type DoneMsg struct {
-	Index int // log index
-	Term  int
+	Index   int // log index
+	Term    int
 	Command interface{}
 }
 
