@@ -2,6 +2,7 @@ package raft
 
 import (
 	"log"
+	"net"
 	"net/rpc"
 	"sync"
 	"time"
@@ -10,16 +11,19 @@ import (
 // Raft Consensus Algorithm implemented as a library
 // https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf
 
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+}
+
 // Raft for a single Raft server
 type Raft struct {
-	me            int         // id of this Raft server
-	cluster       Cluster     // RPC clients of each other server in Raft cluster (excluding this one)
-	server        *rpc.Server // RPC server listening for RPC calls
-	mu            sync.Mutex  // mutex to protect shared access and ensure visibility
-	timer         *time.Timer // time to wait before starting election
-	state         State       // state of this Raft server
-	logIndex      int         // log index where to store next log entry
-	resetElection time.Time   // time (used by follower) to wait before starting election
+	me            int        // id of this Raft server
+	mu            sync.Mutex // mutex to protect shared access and ensure visibility
+	RPCServer                // handles RPC communication to Raft peers
+	state         State      // state of this Raft server
+	logIndex      int        // log index where to store next log entry
+	resetElection time.Time  // time (used by follower) to wait before starting election
+	peers      	  []int      // Raft peers (not including this server)
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -37,28 +41,30 @@ type Raft struct {
 	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
-//// Stop stops the this Raft server. Used for testing
-//func (rf *Raft) Kill() {
-//	rf.mu.Lock()
-//	defer rf.mu.Unlock()
-//	rf.state = Down
-//	log.Printf("[%v] stopped", rf.me)
-//}
-
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(me int, cluster Cluster, server *rpc.Server) *Raft {
+func NewRaft(me int, peers []int) *Raft {
 	rf := &Raft{}
 	rf.me = me
-	rf.cluster = cluster
-	rf.server = server
+	rf.peers = peers
 	rf.currentTerm = 0
 	rf.votedFor = -1
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.state = Follower              // all servers start as follower
+	rf.state = Follower // all servers start as follower
 	rf.log = []LogEntry{{0, 0, nil}} // log entry at index 0 is unused
 	rf.logIndex = 1
 	rf.resetElection = time.Now()
+
+	rf.clients = make(map[int]*rpc.Client)
+	rf.server = rpc.NewServer()
+	if err := rf.server.RegisterName("Raft", rf); err != nil {
+		log.Fatalf("[%v] unable to register RPC Server", rf.me)
+	}
+	var err error
+	if rf.listener, err = net.Listen("tcp", ":0"); err != nil {
+		log.Fatalf("[%v] unable to initialize listener: %s", rf.me, err.Error())
+	}
+	log.Printf("[%v] listening at %s", rf.me, rf.listener.Addr())
 
 	rf.recover() // initialize from saved state before possible server crash
 	go rf.electionWait()
