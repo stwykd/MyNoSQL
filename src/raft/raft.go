@@ -23,7 +23,7 @@ type Raft struct {
 	state         State      // state of this Raft server
 	logIndex      int        // log index where to store next log entry
 	resetElection time.Time  // time (used by follower) to wait before starting election
-	peers      	  []int      // Raft peers (not including this server)
+	peers         []int      // Raft peers (not including this server)
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -116,16 +116,23 @@ func (rf *Raft) heartbeat() {
 // Expects rf.mu to be locked
 func (rf *Raft) toLeader() {
 	rf.state = Leader
-	log.Printf("[%v] becoming Leader at term %v", rf.me, rf.currentTerm)
-	timer := time.NewTimer(HeartbeatInterval)
-	for {
-		select {
-		case <-timer.C:
+	log.Printf("[%v] becoming leader at term %v", rf.me, rf.currentTerm)
+
+	go func() {
+		ticker := time.NewTicker(HeartbeatInterval)
+		defer ticker.Stop()
+
+		// send periodic heartbeats as long as still leader
+		for {
+			rf.heartbeat()
+			<-ticker.C
+
+			rf.mu.Lock()
 			if rf.state != Leader {
+				rf.mu.Unlock()
 				return
 			}
-			rf.heartbeat()
-			timer.Reset(HeartbeatInterval)
+			rf.mu.Unlock()
 		}
-	}
+	}()
 }
