@@ -90,15 +90,16 @@ func (rf *Raft) heartbeat() {
 	savedTerm := rf.currentTerm
 	rf.mu.Unlock()
 
-	for id, peer := range rf.cluster {
+	for _, id := range rf.peers {
 		args := AppendEntriesArgs{
 			Term:     savedTerm,
 			LeaderId: rf.me,
+			Recipient: id,
 		}
-		go func(id int, peer *rpc.Client) {
+		go func(id int) {
 			log.Printf("[%v] sending AppendEntries to %v: args=%+v", rf.me, id, args)
 			var reply AppendEntriesReply
-			if err := peer.Call("Raft.AppendEntries", args, &reply); err == nil {
+			if err := Call(rf, id, "Raft.AppendEntries", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				if reply.Term > savedTerm {
@@ -108,7 +109,7 @@ func (rf *Raft) heartbeat() {
 					return
 				}
 			}
-		}(id, peer)
+		}(id)
 	}
 }
 

@@ -12,8 +12,10 @@ import (
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type AppendEntriesArgs struct {
-	Term     int // leader's term
-	LeaderId int // so follower can redirect clients
+	Term      int // leader's term
+	LeaderId  int // so follower can redirect clients
+	Recipient int
+
 	//PrevLogIndex int        // index log index of log entry immediately preceding new ones
 	//PrevLogTerm  int        // term of prevLogIndex entry
 	//Entries      []LogEntry // log entries to store (empty for heartbeat; may send more than one for efficiency)
@@ -30,10 +32,11 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	log.Printf("[%v] received AppendEntries: Args%+v", rf.me, args)
 	if rf.state == Down {
 		return nil
 	}
+
+	log.Printf("[%v] received AppendEntries RPC call: Args%+v", rf.me, args)
 	if args.Term > rf.currentTerm {
 		log.Printf("[%v] currentTerm=%d out of date with AppendEntriesArgs.Term=%d",
 			rf.me, rf.currentTerm, args.Term)
@@ -48,6 +51,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			rf.toFollower(args.Term)
 		}
 		rf.resetElection = time.Now()
+
 		reply.Success = true
 	}
 
@@ -58,8 +62,10 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type RequestVoteArgs struct {
-	Term        int // candidate's term
-	CandidateId int // candidate requesting vote
+	Term      int // candidate's term
+	Candidate int // candidate requesting vote
+	Recipient int
+
 	//LastLogIndex int // index of candidate’s last log entry
 	//LastLogTerm  int // term of candidate’s last log entry
 }
@@ -74,11 +80,12 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	log.Printf("[%v] received RequestVote: %+v [currentTerm=%d, votedFor=%d]",
-		rf.me, args, rf.currentTerm, rf.votedFor)
 	if rf.state == Down {
 		return nil
 	}
+
+	log.Printf("[%v] received RequestVote RPC call: %+v [currentTerm=%d, votedFor=%d]",
+		rf.me, args, rf.currentTerm, rf.votedFor)
 	if args.Term > rf.currentTerm {
 		// server in past term, revert to follower (and reset its state)
 		log.Printf("[%v] RequestVoteArgs.Term=%d bigger than currentTerm=%d",
@@ -86,15 +93,24 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		rf.toFollower(args.Term)
 	}
 
-	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.CandidateId) {
+	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.Candidate) {
 		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
+		rf.votedFor = args.Candidate
 		rf.resetElection = time.Now()
+
 	} else {
 		reply.VoteGranted = false
 	}
 	reply.Term = rf.currentTerm
 
-	log.Printf("[%v] RequestVoteReply: %+v", rf.me, reply)
+	log.Printf("[%v] replying to RequestVote: %+v", rf.me, reply)
 	return nil
+}
+
+
+func Call(rf *Raft, id int, method string, args interface{}, reply interface{}) error {
+	rf.mu.Lock()
+	peer := rf.clients[id]
+	rf.mu.Unlock()
+	return peer.Call(method, args, reply)
 }
