@@ -3,7 +3,6 @@ package raft
 import (
 	"log"
 	"math/rand"
-	"net/rpc"
 	"sync/atomic"
 	"time"
 )
@@ -26,14 +25,14 @@ func (rf *Raft) electionWait() {
 	for {
 		<-ticker.C
 		rf.mu.Lock()
+
+		// election() running concurrently. server may be a candidate or even a leader already
 		if rf.state != Candidate && rf.state != Follower {
-			// concurrently running election() made this server a leader already
 			log.Printf("[%v] waiting for election with state=%v instead of follower, return",
 				rf.me, rf.state)
 			rf.mu.Unlock()
 			return
 		}
-
 		if termStarted != rf.currentTerm {
 			log.Printf("[%v] while waiting for election, term changed from %d to %d, return",
 				rf.me, termStarted, rf.currentTerm)
@@ -42,6 +41,7 @@ func (rf *Raft) electionWait() {
 		}
 
 		if elapsed := time.Since(rf.resetElection); elapsed >= waitTimeout {
+			log.Printf("[%v] reset timer elapsed: %s", rf.me, elapsed.String())
 			rf.election()
 			rf.mu.Unlock()
 			return
@@ -57,28 +57,30 @@ func (rf *Raft) election() {
 	rf.currentTerm++
 	savedCurrentTerm := rf.currentTerm
 	rf.resetElection = time.Now()
-	log.Printf("[%v] started election and become Candidate at term %v", rf.me, savedCurrentTerm)
+	log.Printf("[%v] started election and became candidate at term %v", rf.me, savedCurrentTerm)
 
 	// candidate votes for itself
 	rf.votedFor = rf.me
 	var votes int32 = 1
-	for id, peer := range rf.cluster {
-		go func(id int, peer *rpc.Client) {
+
+	for _, id := range rf.peers {
+		go func(id int) {
 			args := RequestVoteArgs{
-				Term:        savedCurrentTerm,
-				CandidateId: rf.me,
+				Term:      savedCurrentTerm,
+				Candidate: rf.me,
+				Recipient: id,
 			}
-			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, id, args)
 			var reply RequestVoteReply
 			// blocking RPC call
-			if err := peer.Call("Raft.RequestVote", args, &reply); err == nil {
+			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, id, args)
+			if err := Call(rf, id, "Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
 				if rf.state != Candidate {
 					// might have won election already because there were enough votes from
 					// the other concurrent RequestVote calls issued, or one reply had higher
-					// term, and switched back to Follower. return from election
+					// term, and switched back to follower. return from election
 					log.Printf("[%v] state changed to %v while waiting for RequestVoteReply",
 						rf.me, rf.state)
 					return
@@ -94,7 +96,7 @@ func (rf *Raft) election() {
 				} else if reply.Term == savedCurrentTerm {
 					if reply.VoteGranted {
 						votes := int(atomic.AddInt32(&votes, 1))
-						if votes > (len(rf.cluster)+1)/2 {
+						if votes > (len(rf.peers)+1)/2 {
 							// election won. become leader
 							// remaining goroutines will notice state != candidate and return
 							log.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
@@ -106,9 +108,9 @@ func (rf *Raft) election() {
 			} else {
 				log.Printf("[%v] error during RequestVote RPC: %s", rf.me, err.Error())
 			}
-		}(id, peer)
+		}(id)
 	}
 
-	// this election didn't produce a leader, call electionWait again
+	// wait to start another election
 	go rf.electionWait()
 }
