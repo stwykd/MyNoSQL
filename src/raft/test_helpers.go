@@ -1,106 +1,51 @@
 package raft
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"net/rpc"
 	"sync"
-	"testing"
 )
 
-const BasePort = 30000
-
-func getPeers(cluster map[int]*rpc.Client, me, nServers int) map[int]*rpc.Client {
-	peers := make(map[int]*rpc.Client, nServers-1)
-	for i, p := range cluster {
-		if i != me {
-			peers[i] = p
-		}
-	}
-	return peers
+type TestServer struct {
+	rf       *Raft
+	wg       sync.WaitGroup
 }
 
-func listener(port int) net.Listener {
-	l, e := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if e != nil {
-		log.Fatalf("net.Listen tcp :%d: %v", port, e)
-	}
-	return l
+func NewServer(id int, peers []int) *TestServer {
+	s := new(TestServer)
+	s.rf = NewRaft(id, peers)
+	return s
 }
 
-func setupRaftCluster(raftServers []*Raft, nServers int) {
-	raftServers = make([]*Raft, nServers)
-	servers := make(map[int]*rpc.Server, nServers)
-	clients := make(map[int]map[int]*rpc.Client, nServers)
+func (s *TestServer) Start() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
 
-	for i:=0; i<nServers; i++ {
-		clients[i] = make(map[int]*rpc.Client)
-	}
-
-	wg := sync.WaitGroup{}
-
-	for i :=0; i<nServers; i++ {
-		servers[i] = rpc.NewServer()
-		if err := servers[i].Register(new(Raft)); err != nil {
-			log.Fatalf("unable to register Raft in server %d: %s", i, err.Error())
-		}
-		log.Printf("[%v] registered Raft server", i)
-
-		for j:=0; j<nServers; j++ {
-			if i == j {
-				continue
-			}
-
-			port := BasePort+(i*10)+j
-			l := listener(port)
-			addr := l.Addr().String()
-			wg.Add(1)
-			go func(i, j int) {
-				wg.Wait()
-				log.Printf("[%v] dialing %s ...", j, addr)
-				c, err := net.Dial("tcp", addr)
-				if err != nil {
-					log.Fatalf("[%v] unable to dial server at %s: %s", j, addr, err.Error())
-				}
-				clients[j][i] = rpc.NewClient(c)
-				log.Printf("[%v] connected to %s", j, addr)
-			}(i, j)
-
-			log.Printf("[%v] listening for connections at %s", i, addr)
-			wg.Done()
-			conn, err := l.Accept()
+		for {
+			conn, err := s.rf.listener.Accept()
 			if err != nil {
-				log.Fatalf("[%v] error while accepting connections: %s", i, err.Error())
+				log.Fatal("accept error:", err)
 			}
-			log.Printf("[%v] connected to %s", i, addr)
-			go func(i int) {
-				log.Printf("[%v] starting to serve %s", i, addr)
-				servers[i].ServeConn(conn)
-			}(i)
-
+			s.wg.Add(1)
+			go func() {
+				s.rf.server.ServeConn(conn)
+				s.wg.Done()
+			}()
 		}
-	}
-
-	for i:=0; i<nServers; i++ {
-		raftServers[i] = NewRaft(i, getPeers(clients[i], i, nServers), servers[i])
-	}
+	}()
 }
 
-func findLeader(raftServers[]*Raft, t *testing.T) (leader, term int) {
-	leader, term = -1, -1
-	for i, rf := range raftServers {
-		if rf.state == Leader {
-			if leader != -1 {
-				t.Fatalf("%d and %d are both leaders", rf.me, leader)
-			}
-			leader, term = raftServers[i].me, rf.currentTerm
+func (s *TestServer) Connect(id int, addr net.Addr) {
+	s.rf.mu.Lock()
+	defer s.rf.mu.Unlock()
+	if s.rf.clients[id] == nil {
+		client, err := rpc.Dial(addr.Network(), addr.String())
+		if err != nil {
+			log.Fatalf("unable to connect peers: %s", err.Error())
 		}
+		s.rf.clients[id] = client
 	}
-
-	if leader == -1 {
-		t.Fatalf("no leader elected")
-	}
-	return
 }
 
