@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/rpc"
 	"sync"
+	"testing"
 )
 
 type TestServer struct {
@@ -49,3 +50,35 @@ func (s *TestServer) Connect(id int, addr net.Addr) {
 	}
 }
 
+type TestCluster struct {
+	cluster []*TestServer
+	t *testing.T
+}
+
+func NewTestCluster(t *testing.T, n int) *TestCluster {
+	servers := make([]*TestServer, n)
+
+	for i := 0; i < n; i++ {
+		peers := make([]int, 0)
+		for p := 0; p < n; p++ {
+			if p != i {
+				peers = append(peers, p)
+			}
+		}
+
+		servers[i] = NewServer(i, peers)
+		servers[i].Start()
+	}
+
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if i != j {
+				servers[j].rf.mu.Lock()
+				addr := servers[j].rf.listener.Addr()
+				servers[j].rf.mu.Unlock()
+				servers[i].Connect(j, addr)
+			}
+		}
+	}
+	return &TestCluster{cluster: servers, t: t}
+}
