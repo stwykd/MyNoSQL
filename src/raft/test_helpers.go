@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"sync"
 	"testing"
+	"time"
 )
 
 type TestServer struct {
@@ -81,4 +82,32 @@ func NewTestCluster(t *testing.T, n int) *TestCluster {
 		}
 	}
 	return &TestCluster{cluster: servers, t: t}
+}
+
+
+// FindLeader looks for and returns the current leader
+// If no leader or more leaders are found, the test will fail
+func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
+	for r := 0; r < 5; r++ {
+		leaderId, leaderTerm := -1, -1
+		for i := 0; i < len(tc.cluster); i++ {
+			rf := tc.cluster[i].rf
+			term, isLeader := rf.currentTerm, rf.state == Leader
+			if isLeader {
+				if leaderId < 0 {
+					leaderId = i
+					leaderTerm = term
+				} else {
+					t.Fatalf("%d and %d are both leaders", leaderId, i)
+				}
+			}
+		}
+		if leaderId >= 0 {
+			return leaderId, leaderTerm
+		}
+		time.Sleep(minElectionWait * time.Millisecond)
+	}
+
+	t.Fatalf("no leader elected")
+	return -1, -1
 }
