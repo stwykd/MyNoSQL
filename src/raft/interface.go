@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"time"
 )
@@ -112,5 +113,9 @@ func Call(rf *Raft, id int, method string, args interface{}, reply interface{}) 
 	rf.mu.Lock()
 	peer := rf.clients[id]
 	rf.mu.Unlock()
-	return peer.Call(method, args, reply)
+	if peer != nil {
+		return peer.Call(method, args, reply)
+	} else {
+		return fmt.Errorf("raft server %d: RPC client %d closed", rf.me, id)
+	}
 }

@@ -22,7 +22,7 @@ const (
 	Leader    State = "leader"
 	Follower        = "follower"
 	Candidate       = "candidate"
-	Down            = "down"
+	Down            = "down" // for testing
 )
 
 // DoneMsg is sent back to Raft client after a requested command is committed
