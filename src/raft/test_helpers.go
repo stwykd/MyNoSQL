@@ -165,11 +165,10 @@ func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
 		leaderId, leaderTerm := -1, -1
 		for i := 0; i < len(tc.cluster); i++ {
 			rf := tc.cluster[i].rf
-			term, isLeader := rf.currentTerm, rf.state == Leader
-			if isLeader {
-				if leaderId < 0 {
+			if rf.state == Leader {
+				if leaderId  == -1 {
 					leaderId = i
-					leaderTerm = term
+					leaderTerm = rf.currentTerm
 				} else {
 					t.Fatalf("%d and %d are both leaders", leaderId, i)
 				}
