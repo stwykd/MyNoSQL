@@ -54,7 +54,7 @@ func (ts *TestServer) Connect(id int, addr net.Addr) {
 	if ts.rf.clients[id] == nil {
 		client, err := rpc.Dial(addr.Network(), addr.String())
 		if err != nil {
-			ts.t.Fatalf("[%v] unable to connect peers: %s", ts.rf.me, err.Error())
+			ts.t.Fatalf("%d couldn't dial %d: %s", ts.rf.me, id, err.Error())
 		}
 		ts.rf.clients[id] = client
 	}
@@ -122,8 +122,8 @@ func NewTestCluster(n int, t *testing.T) *TestCluster {
 	return &TestCluster{cluster: servers, t: t}
 }
 
-// DisconnectCluster kills the connection between each Raft server
-func (tc *TestCluster) DisconnectCluster() {
+// KillCluster kills the connection between each Raft server
+func (tc *TestCluster) KillCluster() {
 	log.Printf("[c] closing connectings amongst Raft server")
 	for _, ts := range tc.cluster {
 		ts.DisconnectPeers()
@@ -136,12 +136,18 @@ func (tc *TestCluster) DisconnectCluster() {
 // DisconnectServer disconnects a Raft server from its peers
 func (tc *TestCluster) DisconnectServer(id int) {
 	log.Printf("[c] disconnecting %d to rest of the cluster", id)
-	tc.cluster[id].DisconnectPeers()
+	tc.cluster[id].DisconnectPeers() // disconnect id from its peers
 	for i := 0; i < len(tc.cluster); i++ {
 		if i == id {
 			continue
 		}
-		tc.cluster[i].Disconnect(id)
+		tc.cluster[i].Disconnect(id) // disconnect peer from id
+	}
+}
+
+func (tc *TestCluster) DisconnectCluster() {
+	for id, _ := range tc.cluster {
+		tc.DisconnectServer(id)
 	}
 }
 
@@ -153,6 +159,12 @@ func (tc *TestCluster) ConnectServer(id int) {
 			tc.cluster[id].Connect(j, tc.cluster[j].rf.listener.Addr())
 			tc.cluster[j].Connect(id, tc.cluster[id].rf.listener.Addr())
 		}
+	}
+}
+
+func (tc *TestCluster) ConnectCluster() {
+	for id, _ := range tc.cluster {
+		tc.ConnectServer(id)
 	}
 }
 
@@ -182,4 +194,21 @@ func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
 
 	t.Fatalf("no leader elected")
 	return -1, -1
+}
+
+func NoLeader(tc *TestCluster, t *testing.T) {
+	for _, ts := range tc.cluster {
+		if ConnectedToPeers(ts) && ts.rf.state == Leader {
+			t.Fatalf("%d became a leader without quorum", ts.rf.me)
+		}
+	}
+}
+
+func ConnectedToPeers(ts *TestServer) bool {
+	for _, client := range ts.rf.clients {
+		if client != nil {
+			return true
+		}
+	}
+	return false
 }

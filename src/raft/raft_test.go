@@ -5,23 +5,22 @@ import (
 	"time"
 )
 
-//
-//func TestElection(t *testing.T) {
-//	tc := NewTestCluster(3, t)
-//	defer tc.DisconnectCluster()
-//
-//	FindLeader(tc, t)
-//}
+
+func TestElection(t *testing.T) {
+	tc := NewTestCluster(3, t)
+	defer tc.KillCluster()
+
+	FindLeader(tc, t)
+}
 
 func TestLeaderDown(t *testing.T) {
 	tc := NewTestCluster(3, t)
-	defer tc.DisconnectCluster()
+	defer tc.KillCluster()
 
 	leaderId, term := FindLeader(tc, t)
 
 	tc.cluster[leaderId].DisconnectPeers()
 
-	// after heartbeat interval, followers will realise leader is down
 	time.Sleep(200*time.Millisecond)
 
 	newLeaderId, newTerm := FindLeader(tc, t)
@@ -31,4 +30,22 @@ func TestLeaderDown(t *testing.T) {
 	if newTerm <= term {
 		t.Errorf("want newTerm <= term, got %d and %d", newTerm, term)
 	}
+}
+
+func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
+	tc := NewTestCluster(3, t)
+	defer tc.KillCluster()
+
+	leader, _ := FindLeader(tc, t)
+
+	// remove 2/3 servers
+	server := (leader+1)%len(tc.cluster)
+	tc.DisconnectServer(leader)
+	tc.DisconnectServer(server)
+
+	time.Sleep(350*time.Millisecond)
+
+	NoLeader(tc, t)
+	tc.ConnectServer(server)
+	FindLeader(tc, t)
 }
