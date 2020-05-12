@@ -137,12 +137,3 @@ func (rf *Raft) toLeader() {
 		}
 	}()
 }
-
-
-// Kill kills this raft server
-func (rf *Raft) Kill() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.state = Down
-	log.Printf("[%v] killed", rf.me)
-}
