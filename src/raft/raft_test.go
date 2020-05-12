@@ -49,3 +49,17 @@ func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
 	tc.ConnectServer(server)
 	FindLeader(tc, t)
 }
+
+func TestDisconnectAllThenRestore(t *testing.T) {
+	tc := NewTestCluster(3, t)
+	defer tc.KillCluster()
+
+	time.Sleep(100*time.Millisecond)
+	tc.DisconnectCluster()
+	time.Sleep(450*time.Millisecond)
+	NoLeader(tc, t)
+
+	// Reconnect all servers. A leader will be found.
+	tc.ConnectCluster()
+	FindLeader(tc, t)
+}
