@@ -8,6 +8,7 @@ import (
 
 func TestElection(t *testing.T) {
 	tc := NewTestCluster(3, t)
+	// prevents goroutines still running from affecting other tests
 	defer tc.KillCluster()
 
 	FindLeader(tc, t)
@@ -17,22 +18,43 @@ func TestLeaderDown(t *testing.T) {
 	tc := NewTestCluster(3, t)
 	defer tc.KillCluster()
 
-	leaderId, term := FindLeader(tc, t)
+	leader, term := FindLeader(tc, t)
 
-	tc.cluster[leaderId].DisconnectPeers()
+	tc.cluster[leader].DisconnectPeers()
 
-	time.Sleep(200*time.Millisecond)
+	time.Sleep(ServerSlack)
 
-	newLeaderId, newTerm := FindLeader(tc, t)
-	if newLeaderId == leaderId {
-		t.Errorf("want new leader to be different from orig leader")
+	newLeader, newTerm := FindLeader(tc, t)
+	if newLeader == leader {
+		t.Errorf("leader didn't change after disconencting leader")
 	}
 	if newTerm <= term {
-		t.Errorf("want newTerm <= term, got %d and %d", newTerm, term)
+		t.Errorf("term didn't change after disconnecting leader")
 	}
 }
 
-func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
+func TestReconnectLeader(t *testing.T) {
+	tc := NewTestCluster(5, t)
+	defer tc.KillCluster()
+	leader, _ := FindLeader(tc, t)
+
+	tc.DisconnectServer(leader)
+	time.Sleep(ServerSlack)
+	newLeader, newTerm := FindLeader(tc, t)
+	tc.ConnectServer(leader)
+	time.Sleep(ServerSlack)
+
+	newLeader_, newTerm_ := FindLeader(tc, t)
+
+	if newLeader != newLeader_ {
+		t.Errorf("leader changed from %d to %d", newLeader, newLeader_)
+	}
+	if newTerm_ != newTerm {
+		t.Errorf("term changed from %d to %d", newTerm, newTerm_)
+	}
+}
+
+func TestNoQuorum(t *testing.T) {
 	tc := NewTestCluster(3, t)
 	defer tc.KillCluster()
 
@@ -43,23 +65,22 @@ func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
 	tc.DisconnectServer(leader)
 	tc.DisconnectServer(server)
 
-	time.Sleep(350*time.Millisecond)
+	time.Sleep(ServerSlack*2)
 
-	NoLeader(tc, t)
+	NoQuorum(tc, t)
 	tc.ConnectServer(server)
 	FindLeader(tc, t)
 }
 
-func TestDisconnectAllThenRestore(t *testing.T) {
+func TestRestartCluster(t *testing.T) {
 	tc := NewTestCluster(3, t)
 	defer tc.KillCluster()
 
-	time.Sleep(100*time.Millisecond)
 	tc.DisconnectCluster()
-	time.Sleep(450*time.Millisecond)
-	NoLeader(tc, t)
+	time.Sleep(ClusterSlack)
+	NoQuorum(tc, t)
 
-	// Reconnect all servers. A leader will be found.
 	tc.ConnectCluster()
 	FindLeader(tc, t)
 }
+
