@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// slack duration to wait to allow things to settle
-const ServerSlack, ClusterSlack = 150*time.Millisecond, 450*time.Millisecond
+// slack durations to wait to allow things to settle
+const ServerSlack  = 150 * time.Millisecond
+const ClusterSlack = 450 * time.Millisecond
 
 type TestServer struct {
 	rf       *Raft
@@ -181,22 +182,29 @@ func (tc *TestCluster) ConnectCluster() {
 // FindLeader looks for and returns the current leader
 // If no leader or more leaders are found, the test will fail
 func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
-	leaderId, leaderTerm := -1, -1
-	for i := 0; i < len(tc.cluster); i++ {
-		ts := tc.cluster[i]
-		if connectedToPeers(ts) && ts.rf.state == Leader {
-			if leaderId  == -1 {
-				leaderId = i
-				leaderTerm = ts.rf.currentTerm
-			} else {
-				t.Errorf("%d and %d are both leaders", leaderId, i)
+	for r:=0; r<5; r++ {
+		leaderId, leaderTerm := -1, -1
+		for i := 0; i < len(tc.cluster); i++ {
+			ts := tc.cluster[i]
+			// it's ok for a disconnected server to think it is leader
+			// as no logs are appended without quorum.
+			// when rejoining its peers, it will switch to follower
+			if connectedToPeers(ts) && ts.rf.state == Leader {
+				if leaderId == -1 {
+					leaderId = i
+					leaderTerm = ts.rf.currentTerm
+				} else {
+					t.Errorf("%d and %d are both leaders", leaderId, i)
+				}
 			}
-		}
 
-		if leaderId >= 0 {
-			return leaderId, leaderTerm
+			// leader found, return ...
+			if leaderId >= 0 {
+				return leaderId, leaderTerm
+			}
+			// ... otherwise, wait for things to settle and try again
+			time.Sleep(ServerSlack)
 		}
-		time.Sleep(minElectionWait * time.Millisecond)
 	}
 
 	t.Errorf("no leader elected")
