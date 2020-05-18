@@ -20,14 +20,14 @@ func init() {
 type Raft struct {
 	me            int        // id of this Raft server
 	mu            sync.Mutex // mutex to protect shared access and ensure visibility
-	RPCServer                // handles RPC communication to Raft peers
+	RPCServer           // handles RPC communication to Raft peers
 	state         State      // state of this Raft server
 	logIndex      int        // log index where to store next log entry
 	resetElection time.Time  // time (used by follower) to wait before starting election
 	peers         []int      // Raft peers (not including this server)
 
-	doneCh <-chan DoneMsg // notify the client app when commands are committed
-
+	commitCh chan CommitMsg // notify the client app when commands are committed
+	readyCh  chan struct{}    // Use internally to signal when new entries are ready to be sent  to the client
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -54,10 +54,12 @@ func NewRaft(me int, peers []int) *Raft {
 	rf.votedFor = -1
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.state = Follower // all servers start as follower
+	rf.state = Follower              // all servers start as follower
 	rf.log = []LogEntry{{0, 0, nil}} // log entry at index 0 is unused
 	rf.logIndex = 1
 	rf.resetElection = time.Now()
+	rf.commitCh = make(chan CommitMsg)
+	rf.readyCh = make(chan struct{})
 
 	rf.clients = make(map[int]*rpc.Client)
 	rf.server = rpc.NewServer()
@@ -94,16 +96,28 @@ func (rf *Raft) heartbeat() {
 	savedTerm := rf.currentTerm
 	rf.mu.Unlock()
 
-	for _, id := range rf.peers {
-		args := AppendEntriesArgs{
-			Term:     savedTerm,
-			LeaderId: rf.me,
-			Recipient: id,
-		}
-		go func(id int) {
+	for _, peer := range rf.peers {
+		go func(peer int) {
+			rf.mu.Lock()
+			nextIdx := rf.nextIndex[peer]
+			prevLogIdx := nextIdx - 1
+			prevLogTerm := -1
+			if prevLogIdx >= 0 {
+				prevLogTerm = rf.log[prevLogIdx].Term
+			}
+			entries := rf.log[nextIdx:]
+			args := AppendEntriesArgs{
+				Term:         savedTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: prevLogIdx,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      entries,
+				LeaderCommit: rf.commitIndex,
+			}
+			rf.mu.Unlock()
 			log.Printf("[%v] sending AppendEntries to %v: args=%+v", rf.me, id, args)
 			var reply AppendEntriesReply
-			if err := Call(rf, id, "Raft.AppendEntries", args, &reply); err == nil {
+			if err := Call(rf, peer, "Raft.AppendEntries", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				if reply.Term > savedTerm {
@@ -112,8 +126,43 @@ func (rf *Raft) heartbeat() {
 					rf.toFollower(reply.Term)
 					return
 				}
+
+				if rf.state == Leader && savedTerm == reply.Term {
+					// reply.Success communicates to the leader whether the follower had same prevLogIdx
+					// and prevLogTerm. The leader uses reply.Success to update nextIndex for the follower
+					if reply.Success {
+						rf.nextIndex[peer] = nextIdx + len(entries)
+						rf.matchIndex[peer] = rf.nextIndex[peer] - 1
+						fmt.Printf("[%v] AppendEntries reply from %d success: nextIndex:%v, matchIndex:%v",
+							rf.me, peer, rf.nextIndex, rf.matchIndex)
+
+						savedCommitIdx := rf.commitIndex
+						for i := rf.commitIndex + 1; i < len(rf.log); i++ {
+							if rf.log[i].Term == rf.currentTerm {
+								matches := 1
+								for _, peer := range rf.peers {
+									if rf.matchIndex[peer] >= i {
+										matches++
+									}
+								}
+								// if i is replicated by majority, commitIndex advances to i
+								if matches*2 > len(rf.peers)+1 {
+									rf.commitIndex = i
+								}
+							}
+						}
+						if rf.commitIndex != savedCommitIdx {
+							fmt.Printf("[%v] leader set commitIndex to %d", rf.me, rf.commitIndex)
+							rf.readyCh <- struct{}{}
+						}
+					} else {
+						rf.nextIndex[peer] = nextIdx - 1
+						fmt.Printf("[%v] AppendEntries reply from %d !success: nextIndex:%d",
+							rf.me, peer, nextIdx-1)
+					}
+				}
 			}
-		}(id)
+		}(peer)
 	}
 }
 
@@ -144,7 +193,7 @@ func (rf *Raft) toLeader() {
 
 // Replicate is called by client on the leader to append a new command
 // to the leader's log. the leader will then replicate it to its peers.
-// once the command is committed, the leader will use doneCh to notify
+// once the command is committed, the leader will use commitCh to notify
 // the client
 func (rf *Raft) Replicate(command interface{}) bool {
 	rf.mu.Lock()

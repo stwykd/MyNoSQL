@@ -25,9 +25,9 @@ const (
 	Down            = "down" // for testing
 )
 
-// DoneMsg is used to doneCh the client that a command was replicated by
+// CommitMsg is used to commitCh the client that a command was replicated by
 // a majority (ie it was committed) and it can now be applied by client
-type DoneMsg struct {
+type CommitMsg struct {
 	Index   int // log index
 	Term    int
 	Command interface{}

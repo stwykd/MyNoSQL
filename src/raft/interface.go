@@ -13,9 +13,13 @@ import (
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type AppendEntriesArgs struct {
-	Term      int // leader's term
-	LeaderId  int // so follower can redirect clients
-	Recipient int
+	Term         int // leader's term
+	LeaderId     int // so follower can redirect clients
+	Recipient    int
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 
 	//PrevLogIndex int        // index log index of log entry immediately preceding new ones
 	//PrevLogTerm  int        // term of prevLogIndex entry
