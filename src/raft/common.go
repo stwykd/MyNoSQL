@@ -25,7 +25,8 @@ const (
 	Down            = "down" // for testing
 )
 
-// DoneMsg is sent back to Raft client after a requested command is committed
+// DoneMsg is used to doneCh the client that a command was replicated by
+// a majority (ie it was committed) and it can now be applied by client
 type DoneMsg struct {
 	Index   int // log index
 	Term    int

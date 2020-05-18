@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/rpc"
@@ -24,6 +25,9 @@ type Raft struct {
 	logIndex      int        // log index where to store next log entry
 	resetElection time.Time  // time (used by follower) to wait before starting election
 	peers         []int      // Raft peers (not including this server)
+
+	doneCh <-chan DoneMsg // notify the client app when commands are committed
+
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -136,4 +140,21 @@ func (rf *Raft) toLeader() {
 			rf.mu.Unlock()
 		}
 	}()
+}
+
+// Replicate is called by client on the leader to append a new command
+// to the leader's log. the leader will then replicate it to its peers.
+// once the command is committed, the leader will use doneCh to notify
+// the client
+func (rf *Raft) Replicate(command interface{}) bool {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	log.Printf("[%v] Replicate() called by client with %v", rf.me, command)
+	if rf.state == Leader {
+		rf.log = append(rf.log, LogEntry{Command: command, Term: rf.currentTerm})
+		fmt.Printf("[%v] log: %v", rf.me, rf.log)
+		return true
+	}
+	return false
 }
