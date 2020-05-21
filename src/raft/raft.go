@@ -166,6 +166,34 @@ func (rf *Raft) heartbeat() {
 	}
 }
 
+// NotifyCommit sends committed entries to the client
+// it updates lastApplied to know which entries were sent already, and sends any new entries
+func (rf *Raft) NotifyCommit() {
+	for range rf.readyCh {
+		// Find which entries we have to apply.
+		rf.mu.Lock()
+		savedTerm := rf.currentTerm
+		savedLastApplied := rf.lastApplied
+		var entries []LogEntry
+		if rf.commitIndex > rf.lastApplied {
+			entries = rf.log[rf.lastApplied+1 : rf.commitIndex+1]
+			rf.lastApplied = rf.commitIndex
+		}
+		rf.mu.Unlock()
+		fmt.Printf("NotifyCommit entries=%v, savedLastApplied=%d", entries, savedLastApplied)
+
+		for i, entry := range entries {
+			msg := CommitMsg{
+				Command: entry.Command,
+				Index:   savedLastApplied + i + 1,
+				Term:    savedTerm,
+			}
+			rf.commitCh<-msg
+		}
+	}
+	fmt.Printf("NotifyCommit done")
+}
+
 // toLeader changes Raft server into leader state and starts sending of heartbeats
 // Expects rf.mu to be locked
 func (rf *Raft) toLeader() {
