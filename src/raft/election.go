@@ -63,17 +63,20 @@ func (rf *Raft) election() {
 	rf.votedFor = rf.me
 	var votes int32 = 1
 
-	for _, id := range rf.peers {
-		go func(id int) {
+	for _, peer := range rf.peers {
+		go func(peer int) {
+			lastLogIndex, lastLogTerm := rf.getLastLogIdxAndTerm()
 			args := RequestVoteArgs{
 				Term:      savedCurrentTerm,
 				Candidate: rf.me,
-				Recipient: id,
+				Recipient: peer,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
 			}
+			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, peer, args)
+
 			var reply RequestVoteReply
-			// blocking RPC call
-			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, id, args)
-			if err := Call(rf, id, "Raft.RequestVote", args, &reply); err == nil {
+			if err := Call(rf, peer, "Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
@@ -108,9 +111,20 @@ func (rf *Raft) election() {
 			} else {
 				log.Printf("[%v] error during RequestVote RPC: %s", rf.me, err.Error())
 			}
-		}(id)
+		}(peer)
 	}
 
 	// wait to start another election
 	go rf.electionWait()
+}
+
+func (rf *Raft) getLastLogIdxAndTerm() (int, int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if len(rf.log) > 0 {
+		lastLogIndex := len(rf.log) - 1
+		return lastLogIndex, rf.log[lastLogIndex].Term
+	} else {
+		return -1, -1
+	}
 }

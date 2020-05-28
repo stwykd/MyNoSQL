@@ -103,9 +103,11 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type RequestVoteArgs struct {
-	Term      int // candidate's term
-	Candidate int // candidate requesting vote
-	Recipient int
+	Term         int // candidate's term
+	Candidate    int // candidate requesting vote
+	Recipient    int
+	LastLogIndex int
+	LastLogTerm  int
 
 	//LastLogIndex int // index of candidate’s last log entry
 	//LastLogTerm  int // term of candidate’s last log entry
@@ -125,8 +127,10 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		return nil
 	}
 
-	log.Printf("[%v] received RequestVote RPC call: %+v [currentTerm=%d, votedFor=%d]",
-		rf.me, args, rf.currentTerm, rf.votedFor)
+	lastLogIdx, lastLogTerm := rf.getLastLogIdxAndTerm()
+	log.Printf("[%v] received RequestVote RPC: %+v [currentTerm=%d votedFor=%d lastLogIdx=%d lastLogTerm=%d]",
+		rf.me, args, rf.currentTerm, rf.votedFor, lastLogIdx, lastLogTerm)
+
 	if args.Term > rf.currentTerm {
 		// server in past term, revert to follower (and reset its state)
 		log.Printf("[%v] RequestVoteArgs.Term=%d bigger than currentTerm=%d",
@@ -134,11 +138,14 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		rf.toFollower(args.Term)
 	}
 
-	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.Candidate) {
+	// if hasn't voted or already voted for this candidate or
+	// if the candidate has up-to-date log (section 5.4.1 from paper) ...
+	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.Candidate) &&
+		(args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIdx)) {
+		// ... grant vote
 		reply.VoteGranted = true
 		rf.votedFor = args.Candidate
 		rf.resetElection = time.Now()
-
 	} else {
 		reply.VoteGranted = false
 	}
