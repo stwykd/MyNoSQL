@@ -41,25 +41,27 @@ type Raft struct {
 
 	// Volatile state on leaders
 	// Reinitialized after election
-	nextIndex  []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-	matchIndex []int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+	nextIndex  map[int]int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+	matchIndex map[int]int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(me int, peers []int) *Raft {
+func NewRaft(me int, peers []int, commitCh chan CommitMsg) *Raft {
 	rf := &Raft{}
 	rf.me = me
 	rf.peers = peers
 	rf.currentTerm = 0
 	rf.votedFor = -1
-	rf.commitIndex = 0
-	rf.lastApplied = 0
-	rf.state = Follower              // all servers start as follower
+	rf.commitIndex = -1
+	rf.lastApplied = -1
+	rf.state = Follower // all servers start as follower
 	rf.log = []LogEntry{{0, 0, nil}} // log entry at index 0 is unused
 	rf.logIndex = 1
 	rf.resetElection = time.Now()
-	rf.commitCh = make(chan CommitMsg)
-	rf.readyCh = make(chan struct{})
+	rf.commitCh = commitCh
+	rf.readyCh = make(chan struct{}, 16)
+	rf.nextIndex = make(map[int]int)
+	rf.matchIndex = make(map[int]int)
 
 	rf.clients = make(map[int]*rpc.Client)
 	rf.server = rpc.NewServer()
@@ -132,6 +134,7 @@ func (rf *Raft) heartbeat() {
 					// and prevLogTerm. The leader uses reply.Success to update nextIndex for the follower
 					if reply.Success {
 						rf.nextIndex[peer] = nextIdx + len(entries)
+						// peer appended new entries update matchIndex for this peer
 						rf.matchIndex[peer] = rf.nextIndex[peer] - 1
 						fmt.Printf("[%v] AppendEntries reply from %d success: nextIndex:%v, matchIndex:%v",
 							rf.me, peer, rf.nextIndex, rf.matchIndex)
@@ -146,6 +149,7 @@ func (rf *Raft) heartbeat() {
 									}
 								}
 								// if i is replicated by majority, commitIndex advances to i
+								// the new commitIndex will be sent to follower in the next AppendEntries() RPC
 								if matches*2 > len(rf.peers)+1 {
 									rf.commitIndex = i
 								}

@@ -57,7 +57,43 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		}
 		rf.resetElection = time.Now()
 
-		reply.Success = true
+		// does follower log match leader's (-1 is valid)
+		if (args.PrevLogIndex < len(rf.log) && args.PrevLogTerm == rf.log[args.PrevLogIndex].Term) ||
+			args.PrevLogIndex == -1 {
+			reply.Success = true
+
+			// merge follower's log with leader's log starting from args.PrevLogTerm
+			// skip entries where the term matches where term matches with args.Entries
+			// and insert args.Entries from mismatch index
+			insertIdx := args.PrevLogIndex + 1
+			appendEntriesIdx := 0
+			for {
+				if (insertIdx >= len(rf.log) || appendEntriesIdx >= len(args.Entries)) ||
+					rf.log[insertIdx].Term != args.Entries[appendEntriesIdx].Term {
+					break
+				}
+				insertIdx++
+				appendEntriesIdx++
+			}
+			if appendEntriesIdx < len(args.Entries) {
+				fmt.Printf("[%v] append new entries %v from %d", rf.me,
+					args.Entries[appendEntriesIdx:], insertIdx)
+				rf.log = append(rf.log[:insertIdx], args.Entries[appendEntriesIdx:]...)
+				fmt.Printf("[%v] new log:%v", rf.me, rf.log)
+			}
+
+			// update rf.commitIndex if the leader considers additional log entries as committed
+			if args.LeaderCommit > rf.commitIndex {
+				if args.LeaderCommit < len(rf.log)-1 {
+					rf.commitIndex = args.LeaderCommit
+				} else {
+					rf.commitIndex = len(rf.log)-1
+				}
+				fmt.Printf("[%v] updated commitIndex:%d", rf.me, rf.commitIndex)
+				// notify client of newly committed entries
+				rf.readyCh <- struct{}{}
+			}
+		}
 	}
 
 	reply.Term = rf.currentTerm
