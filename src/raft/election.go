@@ -15,17 +15,15 @@ const minElectionWait, maxElectionWait = 150, 300
 func (rf *Raft) electionWait() {
 	waitTimeout := time.Duration(rand.Intn(maxElectionWait-minElectionWait)+minElectionWait) * time.Millisecond
 	rf.mu.Lock()
-	termStarted := rf.currentTerm
+	termStart := rf.currentTerm
 	rf.mu.Unlock()
-	log.Printf("[%v] electionWait() started: timeout=%v term=%v",
-		rf.me, waitTimeout, termStarted)
+	log.Printf("[%v] electionWait() started: timeout=%v term=%v", rf.me, waitTimeout, termStart)
 
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
 		rf.mu.Lock()
-
 		// election() running concurrently. server may be a candidate or even a leader already
 		if rf.state != Candidate && rf.state != Follower {
 			log.Printf("[%v] waiting for election with state=%v instead of follower, return",
@@ -33,9 +31,9 @@ func (rf *Raft) electionWait() {
 			rf.mu.Unlock()
 			return
 		}
-		if termStarted != rf.currentTerm {
+		if termStart != rf.currentTerm {
 			log.Printf("[%v] while waiting for election, term changed from %d to %d, return",
-				rf.me, termStarted, rf.currentTerm)
+				rf.me, termStart, rf.currentTerm)
 			rf.mu.Unlock()
 			return
 		}
@@ -65,7 +63,10 @@ func (rf *Raft) election() {
 
 	for _, peer := range rf.peers {
 		go func(peer int) {
+			rf.mu.Lock()
 			lastLogIndex, lastLogTerm := rf.getLastLogIdxAndTerm()
+			rf.mu.Unlock()
+
 			args := RequestVoteArgs{
 				Term:      savedCurrentTerm,
 				Candidate: rf.me,
@@ -119,8 +120,7 @@ func (rf *Raft) election() {
 }
 
 func (rf *Raft) getLastLogIdxAndTerm() (int, int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+
 	if len(rf.log) > 0 {
 		lastLogIndex := len(rf.log) - 1
 		return lastLogIndex, rf.log[lastLogIndex].Term
