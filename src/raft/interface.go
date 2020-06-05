@@ -37,6 +37,7 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
 	if rf.state == Down {
 		return nil
 	}
@@ -58,8 +59,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		rf.resetElection = time.Now()
 
 		// does follower log match leader's (-1 is valid)
-		if (args.PrevLogIndex < len(rf.log) && args.PrevLogTerm == rf.log[args.PrevLogIndex].Term) ||
-			args.PrevLogIndex == -1 {
+		if args.PrevLogIndex == -1 ||
+			(args.PrevLogIndex < len(rf.log) && args.PrevLogTerm == rf.log[args.PrevLogIndex].Term) {
 			reply.Success = true
 
 			// merge follower's log with leader's log starting from args.PrevLogTerm
@@ -76,10 +77,10 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				appendEntriesIdx++
 			}
 			if appendEntriesIdx < len(args.Entries) {
-				fmt.Printf("[%v] append new entries %v from %d", rf.me,
+				log.Printf("[%v] append new entries %v from %d", rf.me,
 					args.Entries[appendEntriesIdx:], insertIdx)
 				rf.log = append(rf.log[:insertIdx], args.Entries[appendEntriesIdx:]...)
-				fmt.Printf("[%v] new log:%v", rf.me, rf.log)
+				log.Printf("[%v] new log:%v", rf.me, rf.log)
 			}
 
 			// update rf.commitIndex if the leader considers additional log entries as committed
@@ -89,7 +90,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				} else {
 					rf.commitIndex = len(rf.log)-1
 				}
-				fmt.Printf("[%v] updated commitIndex:%d", rf.me, rf.commitIndex)
+				log.Printf("[%v] updated commitIndex:%d", rf.me, rf.commitIndex)
 				// notify client of newly committed entries
 				rf.readyCh <- struct{}{}
 			}
@@ -123,11 +124,13 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
 	if rf.state == Down {
 		return nil
 	}
 
 	lastLogIdx, lastLogTerm := rf.getLastLogIdxAndTerm()
+
 	log.Printf("[%v] received RequestVote RPC: %+v [currentTerm=%d votedFor=%d lastLogIdx=%d lastLogTerm=%d]",
 		rf.me, args, rf.currentTerm, rf.votedFor, lastLogIdx, lastLogTerm)
 
