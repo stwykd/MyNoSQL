@@ -15,18 +15,21 @@ const ClusterSlack = 450 * time.Millisecond
 
 type TestServer struct {
 	rf       *Raft
-	nServing int
-	t	     *testing.T
+	commits  []Commit // commits sent to client by this server
+	clientCh chan Commit // used to intercept commits sent to the client
 	wg       sync.WaitGroup
 	close	 chan interface{}
+	t	     *testing.T
 }
 
 func NewServer(id int, peers []int, t *testing.T) *TestServer {
-	s := new(TestServer)
-	s.t = t
-	s.rf = NewRaft(id, peers)
-	s.close = make(chan interface{})
-	return s
+	ts := new(TestServer)
+	ts.clientCh = make(chan Commit)
+	ts.rf = NewRaft(id, peers, ts.clientCh)
+	ts.commits = make([]Commit, 0)
+	ts.t = t
+	ts.close = make(chan interface{})
+	return ts
 }
 
 func (ts *TestServer) Start() {
@@ -53,9 +56,9 @@ func (ts *TestServer) Start() {
 	}()
 }
 
+// Connect connects test server to RPC client with id `id`
+// requires mu to be acquired
 func (ts *TestServer) Connect(id int, addr net.Addr) {
-	ts.rf.mu.Lock()
-	defer ts.rf.mu.Unlock()
 	if ts.rf.clients[id] == nil {
 		client, err := rpc.Dial(addr.Network(), addr.String())
 		if err != nil {
@@ -65,10 +68,9 @@ func (ts *TestServer) Connect(id int, addr net.Addr) {
 	}
 }
 
-// Disconnect disconnects RPC client with id `id`
+// Disconnect disconnects RPC client with id `id` from test server
+// requires mu to be acquired
 func (ts *TestServer) Disconnect(id int) {
-	ts.rf.mu.Lock()
-	defer ts.rf.mu.Unlock()
 	if ts.rf.clients[id] != nil {
 		if err := ts.rf.clients[id].Close(); err != nil {
 			ts.t.Errorf("[%v] unable to close connection to %d: %s", ts.rf.me, id, err.Error())
@@ -79,6 +81,8 @@ func (ts *TestServer) Disconnect(id int) {
 
 // DisconnectPeers disconnects all RPC clients
 func (ts *TestServer) DisconnectPeers() {
+	ts.rf.mu.Lock()
+	defer ts.rf.mu.Unlock()
 	for id := range ts.rf.clients {
 		ts.Disconnect(id)
 	}
@@ -123,17 +127,21 @@ func NewTestCluster(n int, t *testing.T) *TestCluster {
 				servers[j].rf.mu.Lock()
 				addr := servers[j].rf.listener.Addr()
 				servers[j].rf.mu.Unlock()
+				servers[i].rf.mu.Lock()
 				servers[i].Connect(j, addr)
+				servers[i].rf.mu.Unlock()
+				log.Printf("[c] %d connected to %d", i, j)
 			}
 		}
 	}
 
-	return &TestCluster{cluster: servers, t: t}
+	tc := &TestCluster{cluster: servers, t:t}
+	return tc
 }
 
 // KillCluster kills the connection between each Raft server
 func (tc *TestCluster) KillCluster() {
-	log.Printf("[c] closing connectings amongst Raft server")
+	log.Printf("[c] closing connections amongst Raft servers and killing Raft servers")
 	for _, ts := range tc.cluster {
 		ts.DisconnectPeers()
 	}
@@ -144,13 +152,16 @@ func (tc *TestCluster) KillCluster() {
 
 // DisconnectServer disconnects a Raft server from its peers
 func (tc *TestCluster) DisconnectServer(id int) {
+
 	log.Printf("[c] disconnecting %d to rest of the cluster", id)
 	tc.cluster[id].DisconnectPeers() // disconnect id from its peers
 	for i := 0; i < len(tc.cluster); i++ {
 		if i == id {
 			continue
 		}
+		tc.cluster[i].rf.mu.Lock()
 		tc.cluster[i].Disconnect(id) // disconnect peer from id
+		tc.cluster[i].rf.mu.Unlock()
 	}
 }
 
@@ -162,11 +173,16 @@ func (tc *TestCluster) DisconnectCluster() {
 
 // ConnectServer connects a Raft server to all of its peers
 func (tc *TestCluster) ConnectServer(id int) {
+
 	log.Printf("[c] connecting %d to rest of the cluster", id)
 	for i := 0; i < len(tc.cluster); i++ {
 		if i != id {
+			tc.cluster[i].rf.mu.Lock()
+			tc.cluster[id].rf.mu.Lock()
 			tc.cluster[id].Connect(i, tc.cluster[i].rf.listener.Addr())
 			tc.cluster[i].Connect(id, tc.cluster[id].rf.listener.Addr())
+			tc.cluster[i].rf.mu.Unlock()
+			tc.cluster[id].rf.mu.Unlock()
 		}
 	}
 }
@@ -177,11 +193,21 @@ func (tc *TestCluster) ConnectCluster() {
 	}
 }
 
-// ==== TESTING METHODS ====
+func connectedToPeers(ts *TestServer) bool {
+	for _, client := range ts.rf.clients {
+		if client != nil {
+			return true
+		}
+	}
+	return false
+}
+
+
+
 
 // FindLeader looks for and returns the current leader
 // If no leader or more leaders are found, the test will fail
-func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
+func (tc *TestCluster) FindLeader(t *testing.T) (int, int) {
 	for r:=0; r<5; r++ {
 		leaderId, leaderTerm := -1, -1
 		for i := 0; i < len(tc.cluster); i++ {
@@ -189,10 +215,15 @@ func FindLeader(tc *TestCluster, t *testing.T) (int, int) {
 			// it's ok for a disconnected server to think it is leader
 			// as no logs are appended without quorum.
 			// when rejoining its peers, it will switch to follower
-			if connectedToPeers(ts) && ts.rf.state == Leader {
+			ts.rf.mu.Lock()
+			state := ts.rf.state
+			ts.rf.mu.Unlock()
+			if connectedToPeers(ts) && state == Leader {
 				if leaderId == -1 {
 					leaderId = i
+					ts.rf.mu.Lock()
 					leaderTerm = ts.rf.currentTerm
+					ts.rf.mu.Unlock()
 				} else {
 					t.Errorf("%d and %d are both leaders", leaderId, i)
 				}
