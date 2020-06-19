@@ -148,3 +148,33 @@ func TestReplicate(t *testing.T) {
 	}
 }
 
+func TestReplicateMore(t *testing.T) {
+	cmds, n := []int{0, 1, 2}, 3
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+
+	leader, _ := tc.FindLeader(t)
+
+	for _, cmd := range cmds {
+		if !Replicate(tc.cluster[leader].rf, cmd) {
+			t.Errorf("expected %d to be leader", leader)
+		}
+		time.Sleep(ServerSlack)
+	}
+
+	nServers0, idx0 := tc.Committed(cmds[0])
+	nServers1, idx1 := tc.Committed(cmds[1])
+	nServers2, idx2 := tc.Committed(cmds[2])
+	if nServers0 != n || nServers1 != n || nServers2 != n {
+		t.Errorf("one or more commands wasn't replicated by all servers")
+	}
+	if idx0 >= idx1 {
+		t.Errorf("cmd %d was replicated before cmd %d, but cmd %d has lower idx: idx0:%d idx1:%d",
+			cmds[0], cmds[1], cmds[0], idx0, idx1)
+	}
+	if idx1 >= idx2 {
+		t.Errorf("cmd %d was replicated before cmd %d, but cmd %d has lower idx: idx0:%d idx1:%d",
+			cmds[0], cmds[2], cmds[0], idx0, idx1)
+	}
+}
+
