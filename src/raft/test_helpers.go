@@ -91,18 +91,31 @@ func (ts *TestServer) DisconnectPeers() {
 // Kill closes the RPC server connections and marks it `Down`
 func (ts *TestServer) Kill() {
 	ts.rf.mu.Lock()
-	defer ts.rf.mu.Unlock()
 	ts.rf.state = Down
 	log.Printf("[%v] killed", ts.rf.me)
-
 	close(ts.close)
 	if err := ts.rf.listener.Close(); err != nil {
 		ts.t.Errorf("[%v] unable to close listener: %s", ts.rf.me, err.Error())
 	}
+	close(ts.clientCh)
+	ts.rf.mu.Unlock()
+
 	ts.wg.Wait() // wait for server to stop serving
 }
 
+func (ts *TestServer) ClientCommits() {
+	for c := range ts.clientCh {
+		log.Printf("[%v] intercepted commit %+v", ts.rf.me, c)
+		ts.rf.mu.Lock()
+		ts.commits = append(ts.commits, c)
+		ts.rf.mu.Unlock()
+	}
+}
+
+
+
 type TestCluster struct {
+	mu sync.Mutex
 	cluster []*TestServer
 	t *testing.T
 }
@@ -111,13 +124,14 @@ func NewTestCluster(n int, t *testing.T) *TestCluster {
 	servers := make([]*TestServer, n)
 
 	for i := 0; i < n; i++ {
-		peers := make([]int, 0)
+		peers := make([]int, n-1)
 		for p := 0; p < n; p++ {
 			if p != i {
 				peers = append(peers, p)
 			}
 		}
 		servers[i] = NewServer(i, peers, t)
+		go servers[i].ClientCommits()
 		servers[i].Start()
 	}
 
@@ -244,17 +258,89 @@ func (tc *TestCluster) FindLeader(t *testing.T) (int, int) {
 
 func NoQuorum(tc *TestCluster, t *testing.T) {
 	for _, ts := range tc.cluster {
-		if connectedToPeers(ts) && ts.rf.state == Leader {
+		ts.rf.mu.Lock()
+		state := ts.rf.state
+		ts.rf.mu.Unlock()
+		if connectedToPeers(ts) && state == Leader {
 			t.Errorf("%d became a leader without quorum", ts.rf.me)
 		}
 	}
 }
 
-func connectedToPeers(ts *TestServer) bool {
-	for _, client := range ts.rf.clients {
-		if client != nil {
-			return true
+// == Replication ==
+
+func (tc *TestCluster) Committed(cmd int) (int, int) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	nCommits := -1
+	for i := 0; i < len(tc.cluster); i++ {
+		tc.cluster[i].rf.mu.Lock()
+		if i == 0 {
+			nCommits = len(tc.cluster[i].commits)
+		} else {
+			if connectedToPeers(tc.cluster[i]) {
+				if len(tc.cluster[i].commits) != nCommits {
+					tc.t.Errorf("num commits sent differs amongst servers %d sent %d commits while" +
+						" %d sent %d commits", 0, nCommits, i, tc.cluster[i].commits)
+				}
+			}
+		}
+		tc.cluster[i].rf.mu.Unlock()
+	}
+
+	for c := 0; c < nCommits; c++ {
+		expCmd, expIdx := -1, -1
+		for i := 0; i < len(tc.cluster); i++ {
+			tc.cluster[i].rf.mu.Lock()
+			if i == 0 {
+				expCmd, expIdx = tc.cluster[i].commits[c].Command.(int), tc.cluster[i].commits[c].Index
+			} else {
+				if connectedToPeers(tc.cluster[i]) {
+					gotCmd := tc.cluster[i].commits[c].Command.(int)
+					if gotCmd != expCmd {
+						tc.t.Errorf("server %d committed cmd %d at %d whilst server %d committed cmd %d"+
+							" at same idx", 0, expCmd, c, i, gotCmd)
+					}
+				}
+			}
+			tc.cluster[i].rf.mu.Unlock()
+		}
+		if expCmd == cmd {
+			nServers := 0
+			for i := 0; i < len(tc.cluster); i++ {
+				tc.cluster[i].rf.mu.Lock()
+				if connectedToPeers(tc.cluster[i]) {
+					gotIdx := tc.cluster[i].commits[c].Index
+					if gotIdx != expIdx {
+						tc.t.Errorf("server %d committed idx %d for cmd %d whilst server %d committed idx %d"+
+							" for the same cmd", 0, expIdx, cmd, i, gotIdx)
+					}
+					nServers++
+				}
+				tc.cluster[i].rf.mu.Unlock()
+			}
+			return nServers, expIdx
 		}
 	}
-	return false
+
+	tc.t.Errorf("command %d not amongst commits", cmd)
+	return -1, -1
+}
+
+func (tc *TestCluster) NotCommitted(cmd int) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	for i := 0; i < len(tc.cluster); i++ {
+		if connectedToPeers(tc.cluster[i]) {
+			tc.cluster[i].rf.mu.Lock()
+			for c := 0; c < len(tc.cluster[i].commits); c++ {
+				gotCmd := tc.cluster[i].commits[c].Command.(int)
+				if gotCmd == cmd {
+					tc.t.Errorf("cmd %d commit by server %d at index %d", cmd, i, c)
+				}
+			}
+			tc.cluster[i].rf.mu.Unlock()
+		}
+	}
 }
