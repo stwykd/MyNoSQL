@@ -119,8 +119,32 @@ func TestReconnectFollower(t *testing.T) {
 	tc.ConnectServer(other)
 	time.Sleep(ServerSlack)
 
-	_, newTerm := FindLeader(tc, t)
+	_, newTerm := tc.FindLeader(t)
 	if newTerm <= term {
 		t.Errorf("newTerm <= term after reconnecting follower")
 	}
 }
+
+
+
+
+// === LOG REPLICATION ===
+
+func TestReplicate(t *testing.T) {
+	cmd, n := 1, 3
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+	time.Sleep(ClusterSlack)
+	leader, _ := tc.FindLeader(t)
+
+	isLeader := Replicate(tc.cluster[leader].rf, cmd)
+	if !isLeader {
+		t.Errorf("expected leader id to be %d", leader)
+	}
+
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmd); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmd, n)
+	}
+}
+
