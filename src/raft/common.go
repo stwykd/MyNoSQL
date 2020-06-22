@@ -25,9 +25,9 @@ const (
 	Down            = "down" // for testing
 )
 
-// CommitMsg is used to commitCh the client that a command was replicated by
+// Commit is used to clientCh the client that a command was replicated by
 // a majority (ie it was committed) and it can now be applied by client
-type CommitMsg struct {
+type Commit struct {
 	Index   int // log index
 	Term    int
 	Command interface{}
