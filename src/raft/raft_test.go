@@ -270,3 +270,50 @@ func TestReplicateLeaderReconnect(t *testing.T) {
 	tc.NotCommitted(cmds[2])
 }
 
+
+func TestReplicateNoMajority(t *testing.T) {
+	cmds, n := []int{0, 1, 2, 3, 4, 5}, 3
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+
+	leader, term := tc.FindLeader(t)
+	Replicate(tc.cluster[leader].rf, cmds[0])
+	Replicate(tc.cluster[leader].rf, cmds[1])
+
+	time.Sleep(ServerSlack*2)
+	if nGot, _ := tc.Committed(cmds[1]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[1], n)
+	}
+
+	other1 := (leader + 1) % n
+	other2 := (other1 + 1) % n
+	tc.DisconnectServer(other1)
+	tc.DisconnectServer(other2)
+	time.Sleep(ServerSlack*2)
+
+	Replicate(tc.cluster[leader].rf, cmds[2])
+	time.Sleep(ServerSlack)
+	tc.NotCommitted(cmds[2])
+
+	tc.ConnectServer(other1)
+	tc.ConnectServer(other2)
+	time.Sleep(ClusterSlack)
+
+	tc.NotCommitted(cmds[2])
+
+	newLeader, newTerm := tc.FindLeader(t)
+	if term == newTerm {
+		t.Errorf("term remained %d", term)
+	}
+
+	Replicate(tc.cluster[newLeader].rf, cmds[3])
+	Replicate(tc.cluster[newLeader].rf, cmds[4])
+	Replicate(tc.cluster[newLeader].rf, cmds[5])
+	time.Sleep(ClusterSlack)
+
+	for _, cmd := range cmds[3:] {
+		if nGot, _ := tc.Committed(cmd); nGot != n {
+			tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmd, n)
+		}
+	}
+}
