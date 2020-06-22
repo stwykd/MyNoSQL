@@ -178,3 +178,16 @@ func TestReplicateMore(t *testing.T) {
 	}
 }
 
+func TestReplicateFollower(t *testing.T) {
+	cmd, n := 1, 3
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+
+	leader, _ := tc.FindLeader(t)
+	other := (leader + 1) % n
+	if Replicate(tc.cluster[other].rf, cmd) { // can only call Replicate on a leader
+		t.Errorf("replicated %d to non-leader %d", cmd, other)
+	}
+}
+
+
