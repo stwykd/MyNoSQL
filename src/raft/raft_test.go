@@ -190,4 +190,83 @@ func TestReplicateFollower(t *testing.T) {
 	}
 }
 
+func TestReplicateReconnect(t *testing.T) {
+	cmds, n := []int{0, 1, 2}, 3
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+
+	leader, _ := tc.FindLeader(t)
+	Replicate(tc.cluster[leader].rf, cmds[0])
+	Replicate(tc.cluster[leader].rf, cmds[1])
+
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmds[1]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[1], n)
+	}
+
+	other := (leader + 1) % 3
+	tc.DisconnectServer(other)
+	time.Sleep(ServerSlack)
+
+	Replicate(tc.cluster[leader].rf, cmds[2])
+	time.Sleep(ClusterSlack)
+	if nGot, _ := tc.Committed(cmds[2]); nGot != n-1 {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[2], n-1)
+	}
+
+	tc.ConnectServer(other)
+	time.Sleep(ClusterSlack)
+	tc.FindLeader(t)
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmds[2]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[2], n)
+	}
+}
+
+func TestReplicateLeaderReconnect(t *testing.T) {
+	cmds, n := []int{0, 1, 2, 3, 4}, 5
+	tc := NewTestCluster(n, t)
+	defer tc.KillCluster()
+
+	leader, _ := tc.FindLeader(t)
+	Replicate(tc.cluster[leader].rf, cmds[0])
+	Replicate(tc.cluster[leader].rf, cmds[1])
+
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmds[1]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[1], n)
+	}
+
+	tc.DisconnectServer(leader)
+
+	Replicate(tc.cluster[leader].rf, cmds[2])
+	time.Sleep(ServerSlack)
+	tc.NotCommitted(cmds[2])
+
+	newLeader, _ := tc.FindLeader(t)
+
+	Replicate(tc.cluster[newLeader].rf, cmds[3])
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmds[3]); nGot != n-1 {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[3], n-1)
+	}
+
+	tc.ConnectServer(leader)
+	time.Sleep(ClusterSlack)
+
+	newNewLeader, _ := tc.FindLeader(t)
+	if newNewLeader == leader {
+		t.Errorf("leader remained %d", leader)
+	}
+
+	Replicate(tc.cluster[newLeader].rf, cmds[4])
+	time.Sleep(ServerSlack)
+	if nGot, _ := tc.Committed(cmds[4]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[4], n)
+	}
+	if nGot, _ := tc.Committed(cmds[3]); nGot != n {
+		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[3], n)
+	}
+	tc.NotCommitted(cmds[2])
+}
 
