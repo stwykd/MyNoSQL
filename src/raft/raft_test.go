@@ -217,7 +217,7 @@ func TestReplicateReconnect(t *testing.T) {
 	tc.ConnectServer(other)
 	time.Sleep(ClusterSlack)
 	tc.FindLeader(t)
-	time.Sleep(ServerSlack)
+	time.Sleep(ClusterSlack)
 	if nGot, _ := tc.Committed(cmds[2]); nGot != n {
 		tc.t.Errorf("%d servers committed cmd %d, expected %d servers to commit this cmd", nGot, cmds[2], n)
 	}
