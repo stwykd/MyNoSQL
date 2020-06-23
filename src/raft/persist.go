@@ -9,10 +9,11 @@ import (
 type Storage interface {
 	Set(key string, value []byte)
 	Get(key string) ([]byte, bool)
-	Ready() bool
+	Ready() bool // is new data available?
 }
 
-
+// restore Raft state from disk
+// used to recover from server crash
 func (rf *Raft) restore() {
 	if encodedTerm, found := rf.storage.Get("currentTerm"); found {
 		if err := gob.NewDecoder(bytes.NewBuffer(encodedTerm)).Decode(&rf.currentTerm); err != nil {
@@ -37,6 +38,8 @@ func (rf *Raft) restore() {
 	}
 }
 
+// persist Raft state to disk.
+// called whenever any persisted variable (term, votedFor and log) changes
 func (rf *Raft) persist() {
 	var encodedTerm bytes.Buffer
 	if err := gob.NewEncoder(&encodedTerm).Encode(rf.currentTerm); err != nil {
