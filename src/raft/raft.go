@@ -42,6 +42,8 @@ type Raft struct {
 	// Reinitialized after election
 	nextIndex  map[int]int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
 	matchIndex map[int]int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+
+	storage Storage
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
@@ -60,6 +62,10 @@ func NewRaft(me int, peers []int, clientCh chan Commit) *Raft {
 	rf.nextIndex = make(map[int]int)
 	rf.matchIndex = make(map[int]int)
 	rf.clients = make(map[int]*rpc.Client)
+
+	if rf.storage.Ready() {
+		rf.restore()
+	}
 
 	rf.server = rpc.NewServer()
 	if err := rf.server.RegisterName("Raft", rf); err != nil {
