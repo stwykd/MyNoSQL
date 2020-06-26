@@ -218,6 +218,36 @@ func connectedToPeers(ts *TestServer) bool {
 
 
 
+type TestStorage struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}
+
+func NewTestStorage() *TestStorage {
+	m := make(map[string][]byte)
+	return &TestStorage{m: m}
+}
+
+func (s *TestStorage) Get(key string) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, found := s.m[key]
+	return v, found
+}
+
+func (s *TestStorage) Set(key string, value []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = value
+}
+
+func (s *TestStorage) Ready() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.m) > 0
+}
+
+
 
 // FindLeader looks for and returns the current leader
 // If no leader or more leaders are found, the test will fail
