@@ -238,6 +238,7 @@ func Replicate(rf *Raft, cmd interface{}) bool {
 	log.Printf("[%v] Replicate() called by client with %v", rf.me, cmd)
 	if rf.state == Leader {
 		rf.log = append(rf.log, LogEntry{Command: cmd, Term: rf.currentTerm})
+		rf.persist()
 		log.Printf("[%v] log %v", rf.me, rf.log)
 		return true
 	}

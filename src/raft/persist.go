@@ -40,6 +40,7 @@ func (rf *Raft) restore() {
 
 // persist Raft state to disk.
 // called whenever any persisted variable (term, votedFor and log) changes
+// expects rf.mu to be taken
 func (rf *Raft) persist() {
 	var encodedTerm bytes.Buffer
 	if err := gob.NewEncoder(&encodedTerm).Encode(rf.currentTerm); err != nil {

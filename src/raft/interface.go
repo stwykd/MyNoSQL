@@ -98,6 +98,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	}
 
 	reply.Term = rf.currentTerm
+	rf.persist()
 	log.Printf("[%v] AppendEntriesReply sent: %+v", rf.me, reply)
 	return nil
 }
@@ -153,7 +154,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 		reply.VoteGranted = false
 	}
 	reply.Term = rf.currentTerm
-
+	rf.persist()
 	log.Printf("[%v] replying to RequestVote: %+v", rf.me, reply)
 	return nil
 }
