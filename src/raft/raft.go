@@ -41,13 +41,14 @@ type Raft struct {
 	// Volatile state on leaders
 	// Reinitialized after election
 	nextIndex  map[int]int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-	matchIndex map[int]int //for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+	matchIndex map[int]int // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 
-	storage Storage
+	storage Storage // storage is an interface for disk storage used to persist Raft state. it simplifies testing
+	updated chan struct{} // updated is used by leaders in heartbeat() to know when the internal state changes
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(me int, peers []int, clientCh chan Commit) *Raft {
+func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage) *Raft {
 	rf := &Raft{}
 	rf.me = me
 	rf.peers = peers
@@ -62,8 +63,10 @@ func NewRaft(me int, peers []int, clientCh chan Commit) *Raft {
 	rf.nextIndex = make(map[int]int)
 	rf.matchIndex = make(map[int]int)
 	rf.clients = make(map[int]*rpc.Client)
+	rf.storage = storage
+	rf.updated = make(chan struct{}, 1)
 
-	if rf.storage.Ready() {
+	if rf.storage.Ready() { // Raft server previously crashed and can be restored
 		rf.restore()
 	}
 
@@ -165,6 +168,7 @@ func (rf *Raft) heartbeat() {
 						if rf.commitIndex != commitIdx {
 							log.Printf("[%v] leader set commitIndex to %d", rf.me, rf.commitIndex)
 							rf.readyCh <- struct{}{}
+							rf.updated <- struct{}{}
 						}
 					} else {
 						rf.nextIndex[peer] = nextIdx - 1
@@ -207,22 +211,52 @@ func NotifyClient(rf *Raft) {
 // Expects rf.mu to be locked
 func (rf *Raft) toLeader() {
 	rf.state = Leader
+
+	// TODO
+	//for _, peer := range rf.peers {
+	//	rf.nextIndex[peer] = len(rf.log)
+	//	rf.matchIndex[peer] = -1
+	//}
+
 	log.Printf("[%v] becoming leader at term %v", rf.me, rf.currentTerm)
 
 	go func() {
-		ticker := time.NewTicker(HeartbeatInterval)
-		defer ticker.Stop()
+		rf.heartbeat()
 
-		// send periodic heartbeats as long as still leader
+		t := time.NewTimer(HeartbeatInterval)
+		defer t.Stop()
 		for {
-			rf.heartbeat()
-			<-ticker.C
-			rf.mu.Lock()
-			if rf.state != Leader {
-				rf.mu.Unlock()
-				return
+			send := false
+			// send heartbeat if leader state is updated or 50ms is elapsed. in either case, reset heartbeat timer
+			select {
+			case <-t.C:
+				// TODO remove send
+				send = true
+
+				t.Stop()
+				t.Reset(HeartbeatInterval)
+			case _, ok := <-rf.updated:
+				if ok {
+					send = true
+				} else {
+					return
+				}
+
+				if !t.Stop() {
+					<-t.C
+				}
+				t.Reset(HeartbeatInterval)
 			}
-			rf.mu.Unlock()
+
+			if send {
+				rf.mu.Lock()
+				if rf.state != Leader {
+					rf.mu.Unlock()
+					return
+				}
+				rf.mu.Unlock()
+				rf.heartbeat()
+			}
 		}
 	}()
 }
@@ -233,14 +267,17 @@ func (rf *Raft) toLeader() {
 // the client
 func Replicate(rf *Raft, cmd interface{}) bool {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
 	log.Printf("[%v] Replicate() called by client with %v", rf.me, cmd)
+
 	if rf.state == Leader {
 		rf.log = append(rf.log, LogEntry{Command: cmd, Term: rf.currentTerm})
 		rf.persist()
 		log.Printf("[%v] log %v", rf.me, rf.log)
+		rf.mu.Unlock()
+		rf.updated <- struct{}{}
 		return true
 	}
+
+	rf.mu.Unlock()
 	return false
 }
