@@ -25,7 +25,7 @@ type TestServer struct {
 func NewServer(id int, peers []int, t *testing.T) *TestServer {
 	ts := new(TestServer)
 	ts.clientCh = make(chan Commit)
-	ts.rf = NewRaft(id, peers, ts.clientCh)
+	ts.rf = NewRaft(id, peers, ts.clientCh, NewTestStorage())
 	ts.commits = make([]Commit, 0)
 	ts.t = t
 	ts.close = make(chan interface{})

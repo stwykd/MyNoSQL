@@ -31,6 +31,10 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+
+	// leader to take follower up to date more quickly (end section 5.3 of paper)
+	ConflictIndex int
+	ConflictTerm  int
 }
 
 // AppendEntries is invoked by leader to replicate log entries; also used as heartbeat.
@@ -93,6 +97,23 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				log.Printf("[%v] updated commitIndex:%d", rf.me, rf.commitIndex)
 				// notify client of newly committed entries
 				rf.readyCh <- struct{}{}
+			}
+		} else {
+			// PrevLogIndex and PrevLogTerm didn't match
+			// set ConflictIndex and ConflictTerm to allow leader to send the right entries quickly
+			if args.PrevLogIndex >= len(rf.log) {
+				reply.ConflictIndex = len(rf.log)
+				reply.ConflictTerm--
+			} else {
+				// PrevLogTerm doesn't match
+				reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+				var idx int
+				for idx = args.PrevLogIndex - 1; idx >= 0; idx-- {
+					if rf.log[idx].Term != reply.ConflictTerm {
+						break
+					}
+				}
+				reply.ConflictIndex = idx + 1
 			}
 		}
 	}

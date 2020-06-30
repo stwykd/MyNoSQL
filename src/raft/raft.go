@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/rpc"
@@ -172,9 +173,23 @@ func (rf *Raft) heartbeat() {
 							rf.updated <- struct{}{}
 						}
 					} else {
-						rf.nextIndex[peer] = nextIdx - 1
-						log.Printf("[%v] AppendEntries reply from %d !success: nextIndex:%d",
-							rf.me, peer, nextIdx-1)
+						if reply.ConflictTerm >= 0 {
+							lastIndexOfTerm := -1
+							for i := len(rf.log) - 1; i >= 0; i-- {
+								if rf.log[i].Term == reply.ConflictTerm {
+									lastIndexOfTerm = i
+									break
+								}
+							}
+							if lastIndexOfTerm >= 0 {
+								rf.nextIndex[peer] = lastIndexOfTerm + 1
+							} else {
+								rf.nextIndex[peer] = reply.ConflictIndex
+							}
+						} else {
+							rf.nextIndex[peer] = reply.ConflictIndex
+						}
+						fmt.Printf("[%v] AppendEntriesReply from %d unsuccessful (peer's nextIndex %d)", rf.me, peer, nextIdx-1)
 					}
 				}
 			}
