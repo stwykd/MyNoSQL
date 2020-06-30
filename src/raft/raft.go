@@ -19,10 +19,10 @@ func init() {
 type Raft struct {
 	me            int        // id of this Raft server
 	mu            sync.Mutex // mutex to protect shared access and ensure visibility
-	RPCServer           // handles RPC communication to Raft peers
+	RPCServer                // handles RPC communication to Raft peers
 	state         State      // state of this Raft server
 	logIndex      int        // log index where to store next log entry
-	resetElection time.Time  // time (used by follower) to wait before starting election
+	resetElection time.Time  // time to wait before starting election. used by follower
 	peers         []int      // Raft peers (not including this server)
 
 	clientCh chan Commit   // notify the client app when commands are committed
@@ -86,6 +86,7 @@ func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage) *Raft {
 		rf.mu.Unlock()
 		rf.electionWait()
 	}()
+
 	go NotifyClient(rf)
 	return rf
 }
