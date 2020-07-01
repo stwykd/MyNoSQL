@@ -71,20 +71,20 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			// skip entries where the term matches where term matches with args.Entries
 			// and insert args.Entries from mismatch index
 			insertIdx := args.PrevLogIndex + 1
-			appendEntriesIdx := 0
+			appendIdx := 0
 			for {
-				if (insertIdx >= len(rf.log) || appendEntriesIdx >= len(args.Entries)) ||
-					rf.log[insertIdx].Term != args.Entries[appendEntriesIdx].Term {
+				if (insertIdx >= len(rf.log) || appendIdx >= len(args.Entries)) ||
+					rf.log[insertIdx].Term != args.Entries[appendIdx].Term {
 					break
 				}
 				insertIdx++
-				appendEntriesIdx++
+				appendIdx++
 			}
-			if appendEntriesIdx < len(args.Entries) {
-				log.Printf("[%v] append new entries %v from %d", rf.me,
-					args.Entries[appendEntriesIdx:], insertIdx)
-				rf.log = append(rf.log[:insertIdx], args.Entries[appendEntriesIdx:]...)
-				log.Printf("[%v] new log:%v", rf.me, rf.log)
+			if appendIdx < len(args.Entries) {
+				log.Printf("[%v] append new entries %+v from %d", rf.me,
+					args.Entries[appendIdx:], insertIdx)
+				rf.log = append(rf.log[:insertIdx], args.Entries[appendIdx:]...)
+				log.Printf("[%v] new log: %+v", rf.me, rf.log)
 			}
 
 			// update rf.commitIndex if the leader considers additional log entries as committed
