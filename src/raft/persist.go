@@ -36,6 +36,7 @@ func (rf *Raft) restore() {
 	} else {
 		log.Fatalf("[%v] error restoring log", rf.me)
 	}
+	log.Printf("[%v] state recovered", rf.me)
 }
 
 // persist Raft state to disk.
@@ -59,4 +60,5 @@ func (rf *Raft) persist() {
 		log.Fatalf("[%v] %s", rf.me, err.Error())
 	}
 	rf.storage.Set("log", encodedLog.Bytes())
+	log.Printf("[%v] state persisted", rf.me)
 }

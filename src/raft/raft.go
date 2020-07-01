@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"net/rpc"
@@ -49,7 +48,7 @@ type Raft struct {
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage) *Raft {
+func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage, wait <-chan interface{}) *Raft {
 	rf := &Raft{}
 	rf.me = me
 	rf.peers = peers
@@ -68,6 +67,7 @@ func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage) *Raft {
 	rf.updated = make(chan struct{}, 1)
 
 	if rf.storage.Ready() { // Raft server previously crashed and can be restored
+		log.Printf("[%v] recovering persisted state", rf.me)
 		rf.restore()
 	}
 
@@ -82,6 +82,7 @@ func NewRaft(me int, peers []int, clientCh chan Commit, storage Storage) *Raft {
 	log.Printf("[%v] listening at %s", rf.me, rf.listener.Addr())
 
 	go func(){
+		<-wait
 		rf.mu.Lock()
 		rf.resetElection = time.Now()
 		rf.mu.Unlock()
@@ -148,7 +149,7 @@ func (rf *Raft) heartbeat() {
 						rf.nextIndex[peer] = nextIdx + len(entries)
 						// peer appended new entries update matchIndex for this peer
 						rf.matchIndex[peer] = rf.nextIndex[peer] - 1
-						log.Printf("[%v] AppendEntries reply from %d success: nextIndex:%v, matchIndex:%v",
+						log.Printf("[%v] AppendEntriesReply from %d successful (nextIndex:%v, matchIndex:%v)",
 							rf.me, peer, rf.nextIndex, rf.matchIndex)
 
 						commitIdx := rf.commitIndex
@@ -189,7 +190,7 @@ func (rf *Raft) heartbeat() {
 						} else {
 							rf.nextIndex[peer] = reply.ConflictIndex
 						}
-						fmt.Printf("[%v] AppendEntriesReply from %d unsuccessful (peer's nextIndex %d)", rf.me, peer, nextIdx-1)
+						log.Printf("[%v] AppendEntriesReply from %d unsuccessful (nextIndex: %d)", rf.me, peer, nextIdx-1)
 					}
 				}
 			}
@@ -210,7 +211,7 @@ func NotifyClient(rf *Raft) {
 			rf.lastApplied = rf.commitIndex
 		}
 		rf.mu.Unlock()
-		log.Printf("[%v] notifying client of new entries %v, lastApplied %d", rf.me, entries, lastApplied)
+		log.Printf("[%v] notifying client of new entries %+v, lastApplied %d", rf.me, entries, lastApplied)
 
 		for i, entry := range entries {
 			rf.clientCh <-Commit{
@@ -228,12 +229,6 @@ func NotifyClient(rf *Raft) {
 func (rf *Raft) toLeader() {
 	rf.state = Leader
 
-	// TODO
-	//for _, peer := range rf.peers {
-	//	rf.nextIndex[peer] = len(rf.log)
-	//	rf.matchIndex[peer] = -1
-	//}
-
 	log.Printf("[%v] becoming leader at term %v", rf.me, rf.currentTerm)
 
 	go func() {
@@ -246,7 +241,6 @@ func (rf *Raft) toLeader() {
 			// send heartbeat if leader state is updated or 50ms is elapsed. in either case, reset heartbeat timer
 			select {
 			case <-t.C:
-				// TODO remove send
 				send = true
 
 				t.Stop()
@@ -288,7 +282,7 @@ func Replicate(rf *Raft, cmd interface{}) bool {
 	if rf.state == Leader {
 		rf.log = append(rf.log, LogEntry{Command: cmd, Term: rf.currentTerm})
 		rf.persist()
-		log.Printf("[%v] log %v", rf.me, rf.log)
+		log.Printf("[%v] log %+v", rf.me, rf.log)
 		rf.mu.Unlock()
 		rf.updated <- struct{}{}
 		return true
