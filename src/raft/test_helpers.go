@@ -9,30 +9,31 @@ import (
 	"time"
 )
 
-// slack durations to wait to allow things to settle
-const ServerSlack  = 150 * time.Millisecond
-const ClusterSlack = 450 * time.Millisecond
-
 type TestServer struct {
 	rf       *Raft
 	commits  []Commit // commits sent to client by this server
 	clientCh chan Commit // used to intercept commits sent to the client
+	storage  Storage
 	wg       sync.WaitGroup
 	close	 chan interface{}
 	t	     *testing.T
 }
 
-func NewServer(id int, peers []int, t *testing.T) *TestServer {
+func NewServer(id int, peers []int, ready chan interface{}, storage Storage, t *testing.T) *TestServer {
 	ts := new(TestServer)
 	ts.clientCh = make(chan Commit)
-	ts.rf = NewRaft(id, peers, ts.clientCh, NewTestStorage())
-	ts.commits = make([]Commit, 0)
+	ts.storage = storage
+	ts.rf = NewRaft(id, peers, ts.clientCh, ts.storage, ready)
 	ts.t = t
 	ts.close = make(chan interface{})
+
+	go ts.ClientCommits()
+	ts.Run()
+
 	return ts
 }
 
-func (ts *TestServer) Start() {
+func (ts *TestServer) Run() {
 	ts.wg.Add(1)
 	go func() {
 		defer ts.wg.Done()
@@ -104,11 +105,19 @@ func (ts *TestServer) Kill() {
 }
 
 func (ts *TestServer) ClientCommits() {
-	for c := range ts.clientCh {
-		log.Printf("[%v] intercepted commit %+v", ts.rf.me, c)
-		ts.rf.mu.Lock()
-		ts.commits = append(ts.commits, c)
-		ts.rf.mu.Unlock()
+	log.Printf("[%v] start listening for commits", ts.rf.me)
+	for {
+		select {
+		case c, ok := <- ts.clientCh:
+			if !ok {
+				log.Printf("[%v] stop listening for commits", ts.rf.me)
+				return
+			}
+			log.Printf("[%v] intercepted commit %+v", ts.rf.me, c)
+			ts.rf.mu.Lock()
+			ts.commits = append(ts.commits, c)
+			ts.rf.mu.Unlock()
+		}
 	}
 }
 
@@ -122,17 +131,16 @@ type TestCluster struct {
 
 func NewTestCluster(n int, t *testing.T) *TestCluster {
 	servers := make([]*TestServer, n)
+	ready := make(chan interface{})
 
-	for i := 0; i < n; i++ {
-		peers := make([]int, n-1)
+	for s := 0; s < n; s++ {
+		var peers []int
 		for p := 0; p < n; p++ {
-			if p != i {
+			if p != s {
 				peers = append(peers, p)
 			}
 		}
-		servers[i] = NewServer(i, peers, t)
-		go servers[i].ClientCommits()
-		servers[i].Start()
+		servers[s] = NewServer(s, peers, ready, NewTestStorage(), t)
 	}
 
 	for i := 0; i < n; i++ {
@@ -148,6 +156,7 @@ func NewTestCluster(n int, t *testing.T) *TestCluster {
 			}
 		}
 	}
+	close(ready)
 
 	tc := &TestCluster{cluster: servers, t:t}
 	return tc
@@ -160,14 +169,16 @@ func (tc *TestCluster) KillCluster() {
 		ts.DisconnectPeers()
 	}
 	for _, ts := range tc.cluster {
-		ts.Kill()
+		if !ts.down() {
+			ts.Kill()
+		}
 	}
 }
 
-// DisconnectServer disconnects a Raft server from its peers
-func (tc *TestCluster) DisconnectServer(id int) {
+// Disconnect disconnects a Raft server from its peers
+func (tc *TestCluster) Disconnect(id int) {
 
-	log.Printf("[c] disconnecting %d to rest of the cluster", id)
+	log.Printf("[%d] disconnected from rest of the cluster", id)
 	tc.cluster[id].DisconnectPeers() // disconnect id from its peers
 	for i := 0; i < len(tc.cluster); i++ {
 		if i == id {
@@ -179,35 +190,35 @@ func (tc *TestCluster) DisconnectServer(id int) {
 	}
 }
 
-func (tc *TestCluster) DisconnectCluster() {
-	for id, _ := range tc.cluster {
-		tc.DisconnectServer(id)
-	}
-}
-
-// ConnectServer connects a Raft server to all of its peers
-func (tc *TestCluster) ConnectServer(id int) {
+// Connect connects a Raft server to all of its peers
+func (tc *TestCluster) Connect(id int) {
 
 	log.Printf("[c] connecting %d to rest of the cluster", id)
-	for i := 0; i < len(tc.cluster); i++ {
-		if i != id {
-			tc.cluster[i].rf.mu.Lock()
+	for peer := 0; peer < len(tc.cluster); peer++ {
+		if peer != id && !tc.cluster[peer].down() {
+			tc.cluster[peer].rf.mu.Lock()
 			tc.cluster[id].rf.mu.Lock()
-			tc.cluster[id].Connect(i, tc.cluster[i].rf.listener.Addr())
-			tc.cluster[i].Connect(id, tc.cluster[id].rf.listener.Addr())
-			tc.cluster[i].rf.mu.Unlock()
+			tc.cluster[id].Connect(peer, tc.cluster[peer].rf.listener.Addr())
+			tc.cluster[peer].Connect(id, tc.cluster[id].rf.listener.Addr())
+			tc.cluster[peer].rf.mu.Unlock()
 			tc.cluster[id].rf.mu.Unlock()
 		}
 	}
 }
 
-func (tc *TestCluster) ConnectCluster() {
+func (tc *TestCluster) KillNetwork() {
 	for id, _ := range tc.cluster {
-		tc.ConnectServer(id)
+		tc.Disconnect(id)
 	}
 }
 
-func connectedToPeers(ts *TestServer) bool {
+func (tc *TestCluster) StartNetwork() {
+	for id, _ := range tc.cluster {
+		tc.Connect(id)
+	}
+}
+
+func connected(ts *TestServer) bool {
 	for _, client := range ts.rf.clients {
 		if client != nil {
 			return true
@@ -220,31 +231,30 @@ func connectedToPeers(ts *TestServer) bool {
 
 type TestStorage struct {
 	mu sync.Mutex
-	m  map[string][]byte
+	st map[string][]byte
 }
 
 func NewTestStorage() *TestStorage {
-	m := make(map[string][]byte)
-	return &TestStorage{m: m}
+	return &TestStorage{st: make(map[string][]byte)}
 }
 
 func (s *TestStorage) Get(key string) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v, found := s.m[key]
+	v, found := s.st[key]
 	return v, found
 }
 
 func (s *TestStorage) Set(key string, value []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[key] = value
+	s.st[key] = value
 }
 
 func (s *TestStorage) Ready() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.m) > 0
+	return len(s.st) > 0
 }
 
 
@@ -262,7 +272,7 @@ func (tc *TestCluster) FindLeader(t *testing.T) (int, int) {
 			ts.rf.mu.Lock()
 			state := ts.rf.state
 			ts.rf.mu.Unlock()
-			if connectedToPeers(ts) && state == Leader {
+			if connected(ts) && state == Leader {
 				if leaderId == -1 {
 					leaderId = i
 					ts.rf.mu.Lock()
@@ -278,7 +288,7 @@ func (tc *TestCluster) FindLeader(t *testing.T) (int, int) {
 				return leaderId, leaderTerm
 			}
 			// ... otherwise, wait for things to settle and try again
-			time.Sleep(ServerSlack)
+			time.Sleep(250*time.Millisecond)
 		}
 	}
 
@@ -291,7 +301,7 @@ func NoQuorum(tc *TestCluster, t *testing.T) {
 		ts.rf.mu.Lock()
 		state := ts.rf.state
 		ts.rf.mu.Unlock()
-		if connectedToPeers(ts) && state == Leader {
+		if connected(ts) && state == Leader {
 			t.Errorf("%d became a leader without quorum", ts.rf.me)
 		}
 	}
@@ -303,19 +313,28 @@ func (tc *TestCluster) Committed(cmd int) (int, int) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	nCommits := -1
-	for i := 0; i < len(tc.cluster); i++ {
-		tc.cluster[i].rf.mu.Lock()
-		if i == 0 {
-			nCommits = len(tc.cluster[i].commits)
+	for id := 0; id < len(tc.cluster); id++ {
+		if tc.cluster[id].down() {
+			continue
+		}
+		tc.cluster[id].rf.mu.Lock()
+		if id == 0 {
+			nCommits = len(tc.cluster[id].commits)
 		} else {
-			if connectedToPeers(tc.cluster[i]) {
-				if len(tc.cluster[i].commits) != nCommits {
-					tc.t.Errorf("num commits sent differs amongst servers %d sent %d commits while" +
-						" %d sent %d commits", 0, nCommits, i, tc.cluster[i].commits)
+			if connected(tc.cluster[id]) {
+				retry := 1
+				for len(tc.cluster[id].commits) != nCommits {
+					if retry == 10 {
+						tc.t.Errorf("num commits sent differs amongst servers:" +
+							"%d sent %d commits but %d sent %d commits", 0, nCommits, id, len(tc.cluster[id].commits))
+					} else {
+						time.Sleep(50*time.Millisecond)
+					}
+					retry++
 				}
 			}
 		}
-		tc.cluster[i].rf.mu.Unlock()
+		tc.cluster[id].rf.mu.Unlock()
 	}
 
 	for c := 0; c < nCommits; c++ {
@@ -325,7 +344,7 @@ func (tc *TestCluster) Committed(cmd int) (int, int) {
 			if i == 0 {
 				expCmd, expIdx = tc.cluster[i].commits[c].Command.(int), tc.cluster[i].commits[c].Index
 			} else {
-				if connectedToPeers(tc.cluster[i]) {
+				if connected(tc.cluster[i]) {
 					gotCmd := tc.cluster[i].commits[c].Command.(int)
 					if gotCmd != expCmd {
 						tc.t.Errorf("server %d committed cmd %d at %d whilst server %d committed cmd %d"+
@@ -339,7 +358,7 @@ func (tc *TestCluster) Committed(cmd int) (int, int) {
 			nServers := 0
 			for i := 0; i < len(tc.cluster); i++ {
 				tc.cluster[i].rf.mu.Lock()
-				if connectedToPeers(tc.cluster[i]) {
+				if connected(tc.cluster[i]) {
 					gotIdx := tc.cluster[i].commits[c].Index
 					if gotIdx != expIdx {
 						tc.t.Errorf("server %d committed idx %d for cmd %d whilst server %d committed idx %d"+
@@ -362,7 +381,7 @@ func (tc *TestCluster) NotCommitted(cmd int) {
 	defer tc.mu.Unlock()
 
 	for i := 0; i < len(tc.cluster); i++ {
-		if connectedToPeers(tc.cluster[i]) {
+		if connected(tc.cluster[i]) {
 			tc.cluster[i].rf.mu.Lock()
 			for c := 0; c < len(tc.cluster[i].commits); c++ {
 				gotCmd := tc.cluster[i].commits[c].Command.(int)
