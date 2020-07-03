@@ -393,3 +393,45 @@ func (tc *TestCluster) NotCommitted(cmd int) {
 		}
 	}
 }
+
+// == Persist ==
+
+// CrashPeer crashes a server, however it's state is expected to be persisted
+func (tc *TestCluster) CrashPeer(id int) {
+	log.Printf("[%v] server crashing", id)
+	tc.Disconnect(id)
+	//h.alive[id] = false
+	tc.cluster[id].Kill()
+
+	tc.mu.Lock()
+	tc.cluster[id].commits = tc.cluster[id].commits[:0]
+	tc.mu.Unlock()
+}
+
+// Start starts a previously crashed server
+func (tc *TestCluster) Start(id int) {
+	if !tc.cluster[id].down() {
+		tc.cluster[id].t.Fatalf("starting alive server %d", id)
+	}
+	log.Printf("[%v] server starting", id)
+
+	var peers []int
+	for p := 0; p < len(tc.cluster); p++ {
+		if p != id {
+			peers = append(peers, p)
+		}
+	}
+
+	ready := make(chan interface{})
+	tc.cluster[id] = NewServer(id, peers, ready, tc.cluster[id].storage, tc.cluster[id].t)
+	tc.Connect(id)
+	close(ready)
+	time.Sleep(20*time.Millisecond)
+}
+
+func (ts *TestServer) down() bool {
+	ts.rf.mu.Lock()
+	down := ts.rf.state == Down
+	ts.rf.mu.Unlock()
+	return down
+}
