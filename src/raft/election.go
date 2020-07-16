@@ -64,20 +64,18 @@ func (rf *Raft) election() {
 	for _, peer := range rf.peers {
 		go func(peer int) {
 			rf.mu.Lock()
-			lastLogIndex, lastLogTerm := rf.getLastLogIdxAndTerm()
+			lastLogIndex, lastLogTerm := rf.lastLogIdxAndTerm()
 			rf.mu.Unlock()
 
 			args := RequestVoteArgs{
 				Term:      savedCurrentTerm,
-				Candidate: rf.me,
-				Recipient: peer,
 				LastLogIndex: lastLogIndex,
 				LastLogTerm:  lastLogTerm,
 			}
 			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, peer, args)
 
 			var reply RequestVoteReply
-			if err := Call(rf, peer, "Raft.RequestVote", args, &reply); err == nil {
+			if err := rf.server.Call(peer, "Raft.RequestVote", args, &reply); err == nil {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
@@ -119,8 +117,7 @@ func (rf *Raft) election() {
 	go rf.electionWait()
 }
 
-func (rf *Raft) getLastLogIdxAndTerm() (int, int) {
-
+func (rf *Raft) lastLogIdxAndTerm() (int, int) {
 	if len(rf.log) > 0 {
 		lastLogIndex := len(rf.log) - 1
 		return lastLogIndex, rf.log[lastLogIndex].Term
