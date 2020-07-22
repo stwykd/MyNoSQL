@@ -1,27 +1,30 @@
 package raft
 
 import (
+	"log"
 	"testing"
 	"time"
 )
 
 func TestElection(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	tc.FindLeader()
+	CheckLeader(tc, t)
 }
 
 func TestLeaderDown(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, term := tc.FindLeader()
+	leader, term := CheckLeader(tc, t)
 
 	tc.Disconnect(leader)
 	time.Sleep(350*time.Millisecond)
 
-	newLeader, newTerm := tc.FindLeader()
+	newLeader, newTerm := CheckLeader(tc, t)
 	if newLeader == leader {
 		t.Errorf("leader didn't change after disconencting leader")
 	}
@@ -32,19 +35,20 @@ func TestLeaderDown(t *testing.T) {
 
 
 func TestReconnectLeader(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
 	tc.Disconnect(leader)
 
 	time.Sleep(350*time.Millisecond)
-	newLeader, newTerm := tc.FindLeader()
+	newLeader, newTerm := CheckLeader(tc, t)
 
 	tc.Connect(leader)
 	time.Sleep(150*time.Millisecond)
 
-	newLeader_, newTerm_ := tc.FindLeader()
+	newLeader_, newTerm_ := CheckLeader(tc, t)
 
 	if newLeader != newLeader_ {
 		t.Errorf("leader changed from %d to %d", newLeader, newLeader_)
@@ -56,19 +60,20 @@ func TestReconnectLeader(t *testing.T) {
 
 
 func TestKeepReconnectingLeader(t *testing.T) {
-	tc := NewTestCluster(t, 5)
+	n := 5
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
 	tc.Disconnect(leader)
 	time.Sleep(150*time.Millisecond)
-	newLeader, newTerm := tc.FindLeader()
+	newLeader, newTerm := CheckLeader(tc, t)
 
 	tc.Connect(leader)
 	time.Sleep(150*time.Millisecond)
 
-	newLeader_, newTerm_ := tc.FindLeader()
+	newLeader_, newTerm_ := CheckLeader(tc, t)
 
 	if newLeader != newLeader_ {
 		t.Errorf("leader changed from %d to %d", newLeader, newLeader_)
@@ -79,70 +84,73 @@ func TestKeepReconnectingLeader(t *testing.T) {
 }
 
 func TestNoQuorum(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
-	// remove 2/3 servers
 	tc.Disconnect(leader)
-	other := (leader + 1) % 3
+	other := (leader + 1) % n
 	tc.Disconnect(other)
 
 	time.Sleep(450*time.Millisecond)
-	tc.NoQuorum()
+	NoQuorum(tc, t)
 
 	tc.Connect(other)
-	tc.FindLeader()
+	CheckLeader(tc, t)
 }
 
 func TestRestartCluster(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	time.Sleep(100*time.Millisecond)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < n; i++ {
 		tc.Disconnect(i)
 	}
 	time.Sleep(450*time.Millisecond)
-	tc.NoQuorum()
+	NoQuorum(tc, t)
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < n; i++ {
 		tc.Connect(i)
 	}
-	tc.FindLeader()
+	CheckLeader(tc, t)
 }
 
 func TestReconnectFollower(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, origTerm := tc.FindLeader()
+	leader, origTerm := CheckLeader(tc, t)
 
-	other := (leader + 1) % 3
+	other := (leader + 1) % n
 	tc.Disconnect(other)
 	time.Sleep(650 * time.Millisecond)
 	tc.Connect(other)
 	time.Sleep(150*time.Millisecond)
 
-	_, newTerm := tc.FindLeader()
+	_, newTerm := CheckLeader(tc, t)
 	if newTerm <= origTerm {
 		t.Errorf("newTerm <= term after reconnecting follower")
 	}
 }
 
 func TestReconnectLeader5(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	for reconnects := 0; reconnects < 5; reconnects++ {
-		leader, _ := tc.FindLeader()
+		leader, _ := CheckLeader(tc, t)
 
 		tc.Disconnect(leader)
-		other := (leader + 1) % 3
+		other := (leader + 1) % n
 		tc.Disconnect(other)
 		time.Sleep(310*time.Millisecond)
-		tc.NoQuorum()
+		NoQuorum(tc, t)
 
 		tc.Connect(other)
 		tc.Connect(leader)
@@ -152,389 +160,560 @@ func TestReconnectLeader5(t *testing.T) {
 }
 
 func TestReplicate(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
-	isLeader := tc.Replicate(leader, 42)
+	isLeader := Replicate(tc, t, leader, 42)
 	if !isLeader {
 		t.Errorf("expected %d to be leader", leader)
 	}
 
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(42, 3)
+	CommittedN(tc, t, 42, n)
 }
 
 func TestReplicateMore(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
-	values := []int{42, 55, 81}
-	for _, v := range values {
-		if !tc.Replicate(leader, v) {
+	cmds := []int{42, 55, 81}
+	for _, v := range cmds {
+		if !Replicate(tc, t, leader, v) {
 			t.Errorf("expected %d to be leader", leader)
 		}
 		time.Sleep(100*time.Millisecond)
 	}
 
 	time.Sleep(250*time.Millisecond)
-	nc, i1 := tc.Committed(42)
-	_, i2 := tc.Committed(55)
-	if nc != 3 {
+	nc, i1 := Committed(tc, t, 42)
+	_, i2 := Committed(tc, t, 55)
+	if nc != n {
 		t.Errorf("want nc=3, got %d", nc)
 	}
 	if i1 >= i2 {
 		t.Errorf("want i1<i2, got i1=%d i2=%d", i1, i2)
 	}
 
-	_, i3 := tc.Committed(81)
+	_, i3 := Committed(tc, t, 81)
 	if i2 >= i3 {
 		t.Errorf("want i2<i3, got i2=%d i3=%d", i2, i3)
 	}
 }
 
 func TestReplicateFollowerReconnect(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	other := (leader + 1) % 3
-	if tc.Replicate(other, 42) {
+	leader, _ := CheckLeader(tc, t)
+	other := (leader + 1) % n
+	if Replicate(tc, t, other, 1) {
 		t.Errorf("didn't expect %d to be leader", other)
 	}
 	time.Sleep(10*time.Millisecond)
 }
 
 func TestReplicateReconnect(t *testing.T) {
-
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	// Submit a couple of values to a fully connected cluster.
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
 
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(6, 3)
+	CommittedN(tc, t, 6, n)
 
-	dPeerId := (leader + 1) % 3
-	tc.Disconnect(dPeerId)
+	other := (leader + 1) % n
+	tc.Disconnect(other)
 	time.Sleep(250*time.Millisecond)
 
-	// Submit a new command; it will be committed but only to two servers.
-	tc.Replicate(leader, 7)
+	Replicate(tc, t, leader, 7)
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(7, 2)
+	CommittedN(tc, t, 7, n-1)
 
-	// Now reconnect dPeerId and wait a bit; it should find the new command too.
-	tc.Connect(dPeerId)
+	tc.Connect(other)
 	time.Sleep(250*time.Millisecond)
-	tc.FindLeader()
+	CheckLeader(tc, t)
 
 	time.Sleep(150*time.Millisecond)
-	tc.CommittedN(7, 3)
+	CommittedN(tc, t, 7, n)
 }
 
 func TestReplicateReconnectLeader(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	// Submit a couple of values to a fully connected cluster.
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(6, 3)
+	CommittedN(tc, t, 6, n)
 
-	// Disconnect leader for a short time (less than election timeout in peers).
 	tc.Disconnect(leader)
 	time.Sleep(90*time.Millisecond)
 	tc.Connect(leader)
 	time.Sleep(200*time.Millisecond)
 
-	tc.Replicate(leader, 7)
+	Replicate(tc, t, leader, 7)
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(7, 3)
+	CommittedN(tc, t, 7, n)
 }
 
 func TestReplicateNoQuorum(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	// Submit a couple of values to a fully connected cluster.
-	leader, origTerm := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
+	leader, origTerm := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
 
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(6, 3)
+	CommittedN(tc, t, 6, n)
 
-	// Disconnect both followers.
-	dPeer1 := (leader + 1) % 3
-	dPeer2 := (leader + 2) % 3
-	tc.Disconnect(dPeer1)
-	tc.Disconnect(dPeer2)
+	other1 := (leader + 1) % n
+	other2 := (leader + 2) % n
+	tc.Disconnect(other1)
+	tc.Disconnect(other2)
 	time.Sleep(250*time.Millisecond)
 
-	tc.Replicate(leader, 8)
+	Replicate(tc, t, leader, 8)
 	time.Sleep(250*time.Millisecond)
-	tc.NotCommitted(8)
+	NotCommitted(tc, t, 8)
 
-	tc.Connect(dPeer1)
-	tc.Connect(dPeer2)
+	tc.Connect(other1)
+	tc.Connect(other2)
 	time.Sleep(600*time.Millisecond)
 
-	tc.NotCommitted(8)
+	NotCommitted(tc, t, 8)
 
-	newLeaderId, againTerm := tc.FindLeader()
+	newLeaderId, againTerm := CheckLeader(tc, t)
 	if origTerm == againTerm {
 		t.Errorf("got origTerm==againTerm==%d; want them different", origTerm)
 	}
 
-	// But new values will be committed for sure...
-	tc.Replicate(newLeaderId, 9)
-	tc.Replicate(newLeaderId, 10)
-	tc.Replicate(newLeaderId, 11)
+	Replicate(tc, t, newLeaderId, 9)
+	Replicate(tc, t, newLeaderId, 10)
+	Replicate(tc, t, newLeaderId, 11)
 	time.Sleep(350*time.Millisecond)
 
 	for _, v := range []int{9, 10, 11} {
-		tc.CommittedN(v, 3)
+		CommittedN(tc, t, v, n)
 	}
 }
 
 func TestReplicateReconnectLeader5(t *testing.T) {
-	tc := NewTestCluster(t, 5)
+	n:=5
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
 
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(6, 5)
+	CommittedN(tc, t, 6, n)
 
-	// Leader disconnected...
 	tc.Disconnect(leader)
 	time.Sleep(10*time.Millisecond)
 
-	tc.Replicate(leader, 7)
+	Replicate(tc, t, leader, 7)
 
 	time.Sleep(250*time.Millisecond)
-	tc.NotCommitted(7)
+	NotCommitted(tc, t, 7)
 
-	newLeaderId, _ := tc.FindLeader()
+	newLeaderId, _ := CheckLeader(tc, t)
 
-	// Submit 8 to new leader.
-	tc.Replicate(newLeaderId, 8)
+	Replicate(tc, t, newLeaderId, 8)
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(8, 4)
+	CommittedN(tc, t, 8, n-1)
 
 	tc.Connect(leader)
 	time.Sleep(600*time.Millisecond)
 
-	finalLeaderId, _ := tc.FindLeader()
+	finalLeaderId, _ := CheckLeader(tc, t)
 	if finalLeaderId == leader {
 		t.Errorf("got finalLeaderId==leader==%d, want them different", finalLeaderId)
 	}
 
-	tc.Replicate(newLeaderId, 9)
+	Replicate(tc, t, newLeaderId, 9)
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(9, 5)
-	tc.CommittedN(8, 5)
+	CommittedN(tc, t, 9, n)
+	CommittedN(tc, t, 8, n)
 
-	// But 7 is not committed...
-	tc.NotCommitted(7)
+	NotCommitted(tc, t, 7)
 }
 
 func TestFollowerCrash(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n:=3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
 
 	time.Sleep(350*time.Millisecond)
-	tc.CommittedN(5, 3)
+	CommittedN(tc, t, 5, n)
 
-	tc.Crash((leader + 1) % 3)
+	Crash(tc, t, (leader + 1) % 3)
 	time.Sleep(350*time.Millisecond)
-	tc.CommittedN(5, 2)
+	CommittedN(tc, t, 5, n-1)
 }
 
 func TestFollowerRestart(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n:=3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
-	tc.Replicate(leader, 7)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
+	Replicate(tc, t, leader, 7)
 
-	vals := []int{5, 6, 7}
+	cmds := []int{5, 6, 7}
 
 	time.Sleep(350*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 
-	tc.Crash((leader + 1) % 3)
+	Crash(tc, t, (leader + 1) % n)
 	time.Sleep(350*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 2)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n-1)
 	}
 
-	tc.Restart((leader + 1) % 3)
+	Restart(tc, t, (leader + 1) % n)
 	time.Sleep(650*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 }
 
 func TestLeaderRestart(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n:=3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
-	tc.Replicate(leader, 7)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
+	Replicate(tc, t, leader, 7)
 
-	vals := []int{5, 6, 7}
+	cmds := []int{5, 6, 7}
 
 	time.Sleep(350*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 
-	tc.Crash(leader)
+	Crash(tc, t, leader)
 	time.Sleep(350*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 2)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n-1)
 	}
 
-	tc.Restart(leader)
+	Restart(tc, t, leader)
 	time.Sleep(550*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 }
 
 func TestClusterRestart(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n:=3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
-	tc.Replicate(leader, 7)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
+	Replicate(tc, t, leader, 7)
 
-	vals := []int{5, 6, 7}
+	cmds := []int{5, 6, 7}
 
 	time.Sleep(350*time.Millisecond)
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 
 	for i := 0; i < 3; i++ {
-		tc.Crash((leader + i) % 3)
+		Crash(tc, t, (leader + i) % n)
 	}
 
 	time.Sleep(350*time.Millisecond)
 
 	for i := 0; i < 3; i++ {
-		tc.Restart((leader + i) % 3)
+		Restart(tc, t, (leader + i) % n)
 	}
 
 	time.Sleep(150*time.Millisecond)
-	newLeaderId, _ := tc.FindLeader()
+	newLeaderId, _ := CheckLeader(tc, t)
 
-	tc.Replicate(newLeaderId, 8)
+	Replicate(tc, t, newLeaderId, 8)
 	time.Sleep(250*time.Millisecond)
 
-	vals = []int{5, 6, 7, 8}
-	for _, v := range vals {
-		tc.CommittedN(v, 3)
+	cmds = []int{5, 6, 7, 8}
+	for _, v := range cmds {
+		CommittedN(tc, t, v, n)
 	}
 }
 
 func TestReplaceLogEntries(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
-	tc.Replicate(leader, 5)
-	tc.Replicate(leader, 6)
+	leader, _ := CheckLeader(tc, t)
+	Replicate(tc, t, leader, 5)
+	Replicate(tc, t, leader, 6)
 
 	time.Sleep(250*time.Millisecond)
-	tc.CommittedN(6, 3)
+	CommittedN(tc, t, 6, n)
 
-	// Leader disconnected...
 	tc.Disconnect(leader)
 	time.Sleep(10*time.Millisecond)
 
-	tc.Replicate(leader, 21)
+	Replicate(tc, t, leader, 21)
 	time.Sleep(5*time.Millisecond)
-	tc.Replicate(leader, 22)
+	Replicate(tc, t, leader, 22)
 	time.Sleep(5*time.Millisecond)
-	tc.Replicate(leader, 23)
+	Replicate(tc, t, leader, 23)
 	time.Sleep(5*time.Millisecond)
-	tc.Replicate(leader, 24)
+	Replicate(tc, t, leader, 24)
 	time.Sleep(5*time.Millisecond)
 
-	newLeaderId, _ := tc.FindLeader()
+	newLeaderId, _ := CheckLeader(tc, t)
 
-	tc.Replicate(newLeaderId, 8)
+	Replicate(tc, t, newLeaderId, 8)
 	time.Sleep(5*time.Millisecond)
-	tc.Replicate(newLeaderId, 9)
+	Replicate(tc, t, newLeaderId, 9)
 	time.Sleep(5*time.Millisecond)
-	tc.Replicate(newLeaderId, 10)
+	Replicate(tc, t, newLeaderId, 10)
 	time.Sleep(250*time.Millisecond)
-	tc.NotCommitted(21)
-	tc.CommittedN(10, 2)
+	NotCommitted(tc, t, 21)
+	CommittedN(tc, t, 10, n-1)
 
-	tc.Crash(newLeaderId)
+	Crash(tc, t, newLeaderId)
 	time.Sleep(60*time.Millisecond)
-	tc.Restart(newLeaderId)
+	Restart(tc, t, newLeaderId)
 
 	time.Sleep(100*time.Millisecond)
-	finalLeaderId, _ := tc.FindLeader()
+	finalLeaderId, _ := CheckLeader(tc, t)
 	tc.Connect(leader)
 	time.Sleep(400*time.Millisecond)
 
-	tc.Replicate(finalLeaderId, 11)
+	Replicate(tc, t, finalLeaderId, 11)
 	time.Sleep(250*time.Millisecond)
 
-	tc.NotCommitted(21)
-	tc.CommittedN(11, 3)
-	tc.CommittedN(10, 3)
+	NotCommitted(tc, t, 21)
+	CommittedN(tc, t, 11, n)
+	CommittedN(tc, t, 10, n)
 }
 
 func TestReplicateThenCrash(t *testing.T) {
-	tc := NewTestCluster(t, 3)
+	n := 3
+	tc := NewTestCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
-	leader, _ := tc.FindLeader()
+	leader, _ := CheckLeader(tc, t)
 
-	tc.Replicate(leader, 5)
+	Replicate(tc, t, leader, 5)
 	time.Sleep(1*time.Millisecond)
-	tc.Crash(leader)
+	Crash(tc, t, leader)
 
 	time.Sleep(10*time.Millisecond)
-	tc.FindLeader()
+	CheckLeader(tc, t)
 	time.Sleep(300*time.Millisecond)
-	tc.NotCommitted(5)
+	NotCommitted(tc, t, 5)
 
-	tc.Restart(leader)
+	Restart(tc, t, leader)
 	time.Sleep(150*time.Millisecond)
-	newLeaderId, _ := tc.FindLeader()
-	tc.NotCommitted(5)
+	newLeaderId, _ := CheckLeader(tc, t)
+	NotCommitted(tc, t, 5)
 
-	tc.Replicate(newLeaderId, 6)
+	Replicate(tc, t, newLeaderId, 6)
 	time.Sleep(100*time.Millisecond)
-	tc.CommittedN(5, 3)
-	tc.CommittedN(6, 3)
+	CommittedN(tc, t, 5, n)
+	CommittedN(tc, t, 6, n)
+}
+
+
+
+
+
+// Test helpers
+
+// == Election ==
+
+func CheckLeader(tc *Cluster, t *testing.T) (int, int) {
+	for r := 0; r < 8; r++ {
+		leaderId, leaderTerm := -1, -1
+		for i := 0; i < tc.n; i++ {
+			if tc.connected[i] {
+				tc.cluster[i].rf.mu.Lock()
+				term, isLeader := tc.cluster[i].rf.currentTerm, tc.cluster[i].rf.state == Leader
+				tc.cluster[i].rf.mu.Unlock()
+				if isLeader {
+					if leaderId < 0 {
+						leaderId = i
+						leaderTerm = term
+					} else {
+						t.Fatalf("both %d and %d think they're leaders", leaderId, i)
+					}
+				}
+			}
+		}
+		if leaderId >= 0 {
+			return leaderId, leaderTerm
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	t.Fatalf("no leader elected")
+	return -1, -1
+}
+
+// NoQuorum checks that no connected server considers itself the leader.
+func NoQuorum(tc *Cluster, t *testing.T) {
+	for id := 0; id < tc.n; id++ {
+		if tc.connected[id] {
+			tc.cluster[id].rf.mu.Lock()
+			tc.cluster[id].rf.mu.Unlock()
+			if tc.cluster[id].rf.state == Leader {
+				t.Fatalf("%d became a leader without quorum", tc.cluster[id].rf.me)
+			}
+		}
+	}
+}
+
+
+// == Replication ==
+
+func Committed(tc *Cluster, t *testing.T, cmd int) (nc int, index int) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	nCommits := -1
+	for id := 0; id < tc.n; id++ {
+		if tc.connected[id] {
+			if nCommits >= 0 {
+				if len(tc.commits[id]) != nCommits {
+					t.Fatalf("num commits sent to client differs amongst servers")
+				}
+			} else {
+				nCommits = len(tc.commits[id])
+			}
+		}
+	}
+
+	for c := 0; c < nCommits; c++ {
+		expCmd := -1
+		for id := 0; id < tc.n; id++ {
+			if tc.connected[id] {
+				gotCmd := tc.commits[id][c].Command.(int)
+				if expCmd >= 0 {
+					if gotCmd != expCmd {
+						t.Errorf("got %d, want %d at tc.commits[%d][%d]", gotCmd, expCmd, id, c)
+					}
+				} else {
+					expCmd = gotCmd
+				}
+			}
+		}
+		if expCmd == cmd {
+			expIdx := -1
+			nServers := 0
+			for i := 0; i < tc.n; i++ {
+				if tc.connected[i] {
+					gotIdx := tc.commits[i][c].Index
+					if expIdx >= 0 && gotIdx != expIdx {
+						t.Errorf("server %d committed idx %d for cmd %d whilst server %d committed idx %d"+
+							" for the same cmd", 0, expIdx, cmd, i, gotIdx)
+					} else {
+						expIdx = tc.commits[i][c].Index
+					}
+					nServers++
+				}
+			}
+			return nServers, expIdx
+		}
+	}
+
+	t.Errorf("command %d not amongst commits", cmd)
+	return -1, -1
+}
+
+// CommittedN verifies that cmd was committed n times
+func CommittedN(tc *Cluster, t *testing.T, cmd int, n int) {
+	if nCommitted, _ := Committed(tc, t, cmd); nCommitted != n {
+		t.Errorf("%d servers committed %d, expected %d servers to commit it", nCommitted, cmd, n)
+	}
+}
+
+// NotCommitted verifies that cmd was not committed by any cluster server
+func NotCommitted(tc *Cluster, t *testing.T, cmd int) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	for id := 0; id < tc.n; id++ {
+		if tc.connected[id] {
+			for c := 0; c < len(tc.commits[id]); c++ {
+				gotCmd := tc.commits[id][c].Command.(int)
+				if gotCmd == cmd {
+					t.Errorf("found %d at commits[%d][%d], expected none", cmd, id, c)
+				}
+			}
+		}
+	}
+}
+
+func Replicate(tc *Cluster, t *testing.T, id int, cmd interface{}) bool {
+	return tc.cluster[id].rf.Replicate(cmd)
+}
+
+// == Persist ==
+
+// Crash crashes a server, however it's state is expected to be persisted
+func Crash(tc *Cluster, t *testing.T, id int) {
+	log.Printf("[%v] server crashing", id)
+	tc.Disconnect(id)
+	tc.alive[id] = false
+	tc.cluster[id].Kill()
+
+	tc.mu.Lock()
+	tc.commits[id] = tc.commits[id][:0]
+	tc.mu.Unlock()
+}
+
+// Restart restarts previously crashed server
+func Restart(tc *Cluster, t *testing.T, id int) {
+	if tc.alive[id] {
+		log.Fatalf("me=%d is alive in Restart", id)
+	}
+	log.Printf("[%v] server starting", id)
+
+	peerIds := make([]int, 0)
+	for p := 0; p < tc.n; p++ {
+		if p != id {
+			peerIds = append(peerIds, p)
+		}
+	}
+
+	ready := make(chan interface{})
+	tc.cluster[id] = NewServer(id, peerIds, tc.storage[id], ready, tc.clientChs[id])
+	tc.cluster[id].Run()
+	tc.Connect(id)
+	close(ready)
+	tc.alive[id] = true
+	time.Sleep(20*time.Millisecond)
 }
