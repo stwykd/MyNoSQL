@@ -3,8 +3,11 @@ package raft
 import (
 	"log"
 	"math/rand"
+	"net"
+	"net/rpc"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,18 +18,51 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 }
 
+const HeartbeatInterval = 50 * time.Millisecond
+
+// LogEntry is a single entry in a Raft server's log
+type LogEntry struct {
+	Index   int
+	Term    int
+	Command interface{}
+}
+
+// State of a Raft server
+type State string
+
+const (
+	Leader    State = "leader"
+	Follower        = "follower"
+	Candidate       = "candidate"
+	Down            = "down" // for testing
+)
+
+// Commit is used to clientCh the client that a command was replicated by
+// a majority (ie it was committed) and it can now be applied by client
+type Commit struct {
+	Index   int // log index
+	Term    int
+	Command interface{}
+}
+
+type RPCServer struct {
+	server   *rpc.Server
+	clients  map[int]*rpc.Client
+	listener net.Listener
+}
+
 type Raft struct {
 	me            int        // id of this Raft server
 	mu            sync.Mutex // mutex to protect shared access and ensure visibility
 	RPCServer                // handles RPC communication to Raft peers
-	server   *TestServer
+	server        *Server
 	state         State      // state of this Raft server
 	logIndex      int        // log index where to store next log entry
-	resetElection time.Time  // time to wait before starting election. used by follower
+	resetElection time.Time  // time to wait before starting election. used by followers
 	peers         []int      // Raft peers (not including this server)
 
 	clientCh chan <-Commit   // notify the client app when commands are committed
-	readyCh  chan struct{} // Use internally to signal when new entries are ready to be sent  to the client
+	readyCh  chan struct{}   // Use to signal when new entries are ready to be sent to client
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -48,13 +84,13 @@ type Raft struct {
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(id int, peerIds []int, server *TestServer, storage Storage, ready <-chan interface{}, commitChan chan <-Commit) *Raft {
+func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, clientCh chan <-Commit) *Raft {
 	rf := new(Raft)
 	rf.me = id
 	rf.peers = peerIds
 	rf.server = server
 	rf.storage = storage
-	rf.clientCh = commitChan
+	rf.clientCh = clientCh
 	rf.readyCh = make(chan struct{}, 16)
 	rf.updated = make(chan struct{}, 1)
 	rf.state = Follower
@@ -85,8 +121,127 @@ func (rf *Raft) Stop() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	rf.state = Down
-	log.Printf("becomes Down")
+	log.Printf("[%d] stopped", rf.me)
 	close(rf.readyCh)
+}
+
+// range suggested in paper
+const minElectionWait, maxElectionWait = 150, 300
+
+// electionWait starts a timer towards becoming a candidate in a new election.
+// it is run by a follower as long as it receives heartbeats
+func (rf *Raft) electionWait() {
+	waitTimeout := time.Duration(rand.Intn(maxElectionWait-minElectionWait)+minElectionWait) * time.Millisecond
+	rf.mu.Lock()
+	termStart := rf.currentTerm
+	rf.mu.Unlock()
+	log.Printf("[%v] electionWait() started: timeout=%v term=%v", rf.me, waitTimeout, termStart)
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		rf.mu.Lock()
+		// election() running concurrently. server may be a candidate or even a leader already
+		if rf.state != Candidate && rf.state != Follower {
+			log.Printf("[%v] waiting for election with state=%v instead of follower, return",
+				rf.me, rf.state)
+			rf.mu.Unlock()
+			return
+		}
+		if termStart != rf.currentTerm {
+			log.Printf("[%v] while waiting for election, term changed from %d to %d, return",
+				rf.me, termStart, rf.currentTerm)
+			rf.mu.Unlock()
+			return
+		}
+
+		if elapsed := time.Since(rf.resetElection); elapsed >= waitTimeout {
+			log.Printf("[%v] reset timer elapsed: %s", rf.me, elapsed.String())
+			rf.election()
+			rf.mu.Unlock()
+			return
+		}
+		rf.mu.Unlock()
+	}
+}
+
+// election starts a new election with this server as a candidate.
+// Expects rf.mu to be locked.
+func (rf *Raft) election() {
+	rf.state = Candidate
+	rf.currentTerm++
+	savedCurrentTerm := rf.currentTerm
+	rf.resetElection = time.Now()
+	log.Printf("[%v] started election and became candidate at term %v", rf.me, savedCurrentTerm)
+
+	// candidate votes for itself
+	rf.votedFor = rf.me
+	var votes int32 = 1
+
+	for _, peer := range rf.peers {
+		go func(peer int) {
+			rf.mu.Lock()
+			lastLogIndex, lastLogTerm := rf.lastLogIdxAndTerm()
+			rf.mu.Unlock()
+
+			args := RequestVoteArgs{
+				Term:      savedCurrentTerm,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
+			}
+			log.Printf("[%v] sending RequestVote to %d: Args%+v", rf.me, peer, args)
+
+			var reply RequestVoteReply
+			if err := rf.server.Call(peer, "Raft.RequestVote", args, &reply); err == nil {
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+				log.Printf("[%v] received RequestVoteReply %+v", rf.me, reply)
+				if rf.state != Candidate {
+					// might have won election already because there were enough votes from
+					// the other concurrent RequestVote calls issued, or one reply had higher
+					// term, and switched back to follower. return from election
+					log.Printf("[%v] state changed to %v while waiting for RequestVoteReply",
+						rf.me, rf.state)
+					return
+				}
+
+				if reply.Term > savedCurrentTerm {
+					// reply term higher than saved term. this can happen if another candidate won
+					// an election while we were collecting votes
+					log.Printf("[%v] RequestVoteReply.Term=%v while currentTerm=%v, returning",
+						rf.me, reply.Term, savedCurrentTerm)
+					rf.toFollower(reply.Term)
+					return
+				} else if reply.Term == savedCurrentTerm {
+					if reply.VoteGranted {
+						votes := int(atomic.AddInt32(&votes, 1))
+						if votes > (len(rf.peers)+1)/2 {
+							// election won. become leader
+							// remaining goroutines will notice state != candidate and return
+							log.Printf("[%v] received %d votes, becoming leader", rf.me, votes)
+							rf.toLeader()
+							return
+						}
+					}
+				}
+			} else {
+				log.Printf("[%v] error during RequestVote RPC: %s", rf.me, err.Error())
+			}
+		}(peer)
+	}
+
+	// wait to start another election
+	go rf.electionWait()
+}
+
+func (rf *Raft) lastLogIdxAndTerm() (int, int) {
+	if len(rf.log) > 0 {
+		lastLogIndex := len(rf.log) - 1
+		return lastLogIndex, rf.log[lastLogIndex].Term
+	} else {
+		return -1, -1
+	}
 }
 
 // electionTimeout generates a pseudo-random election timeout duration.
@@ -310,4 +465,8 @@ func (rf *Raft) Replicate(cmd interface{}) bool {
 
 	rf.mu.Unlock()
 	return false
+}
+
+func (rf *Raft) isLeader() bool {
+	return rf.state == Leader
 }
