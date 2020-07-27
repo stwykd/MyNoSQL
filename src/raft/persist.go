@@ -71,3 +71,37 @@ func (rf *Raft) persist() {
 	}
 	rf.storage.Set("log", logData.Bytes())
 }
+
+
+// dummy Storage used for testing
+
+func NewTestStorage() *TestStorage {
+	return &TestStorage{st: make(map[string][]byte)}
+}
+
+func (ms *TestStorage) Get(k string) ([]byte, bool) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	v, found := ms.st[k]
+	return v, found
+}
+
+func (ms *TestStorage) Set(k string, v []byte) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.st[k] = v
+}
+
+func (ms *TestStorage) Ready() bool {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	return len(ms.st) > 0
+}
+
+func getNTestStorage(n int) []Storage  {
+	storage := make([]Storage, n)
+	for i:=0; i<n; i++ {
+		storage[i] = NewTestStorage()
+	}
+	return storage
+}
