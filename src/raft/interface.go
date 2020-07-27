@@ -6,14 +6,14 @@ import (
 )
 
 // RPC interface exposed by each Raft server
-// See Figure 2 of paper
+// See Figure 2 of Raft paper
 // RPC calls can take a long while to arrive - when replying, the code may have moved on
 // and it's important to gracefully give up in such cases.
 
 // AppendEntriesArgs arguments sent in AppendEntry() RPC
 type AppendEntriesArgs struct {
 	Term   int // leader's term
-	Leader int // so that followers can redirect clients to leader
+	Leader int // so that followers can redirect peers to leader
 
 	PrevLogIndex int // index log index of log entry immediately preceding new ones
 	PrevLogTerm  int // term of prevLogIndex entry
