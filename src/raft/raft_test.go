@@ -8,7 +8,7 @@ import (
 
 func TestElection(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	CheckLeader(tc, t)
@@ -16,7 +16,7 @@ func TestElection(t *testing.T) {
 
 func TestLeaderDown(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, term := CheckLeader(tc, t)
@@ -36,7 +36,7 @@ func TestLeaderDown(t *testing.T) {
 
 func TestReconnectLeader(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 	leader, _ := CheckLeader(tc, t)
 
@@ -61,7 +61,7 @@ func TestReconnectLeader(t *testing.T) {
 
 func TestKeepReconnectingLeader(t *testing.T) {
 	n := 5
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -85,7 +85,7 @@ func TestKeepReconnectingLeader(t *testing.T) {
 
 func TestNoQuorum(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -103,7 +103,7 @@ func TestNoQuorum(t *testing.T) {
 
 func TestRestartCluster(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	time.Sleep(100*time.Millisecond)
@@ -121,7 +121,7 @@ func TestRestartCluster(t *testing.T) {
 
 func TestReconnectFollower(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, origTerm := CheckLeader(tc, t)
@@ -140,7 +140,7 @@ func TestReconnectFollower(t *testing.T) {
 
 func TestReconnectLeader5(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	for reconnects := 0; reconnects < 5; reconnects++ {
@@ -161,7 +161,7 @@ func TestReconnectLeader5(t *testing.T) {
 
 func TestReplicate(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -177,7 +177,7 @@ func TestReplicate(t *testing.T) {
 
 func TestReplicateMore(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -208,7 +208,7 @@ func TestReplicateMore(t *testing.T) {
 
 func TestReplicateFollowerReconnect(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -221,7 +221,7 @@ func TestReplicateFollowerReconnect(t *testing.T) {
 
 func TestReplicateReconnect(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -249,7 +249,7 @@ func TestReplicateReconnect(t *testing.T) {
 
 func TestReplicateReconnectLeader(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -270,7 +270,7 @@ func TestReplicateReconnectLeader(t *testing.T) {
 
 func TestReplicateNoQuorum(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, origTerm := CheckLeader(tc, t)
@@ -313,7 +313,7 @@ func TestReplicateNoQuorum(t *testing.T) {
 
 func TestReplicateReconnectLeader5(t *testing.T) {
 	n:=5
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -355,7 +355,7 @@ func TestReplicateReconnectLeader5(t *testing.T) {
 
 func TestFollowerCrash(t *testing.T) {
 	n:=3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -371,7 +371,7 @@ func TestFollowerCrash(t *testing.T) {
 
 func TestFollowerRestart(t *testing.T) {
 	n:=3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -401,7 +401,7 @@ func TestFollowerRestart(t *testing.T) {
 
 func TestLeaderRestart(t *testing.T) {
 	n:=3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -431,7 +431,7 @@ func TestLeaderRestart(t *testing.T) {
 
 func TestClusterRestart(t *testing.T) {
 	n:=3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -470,7 +470,7 @@ func TestClusterRestart(t *testing.T) {
 
 func TestReplaceLogEntries(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)
@@ -522,7 +522,7 @@ func TestReplaceLogEntries(t *testing.T) {
 
 func TestReplicateThenCrash(t *testing.T) {
 	n := 3
-	tc := NewTestCluster(getNTestStorage(n), n)
+	tc := NewCluster(getNTestStorage(n), n)
 	defer tc.KillCluster()
 
 	leader, _ := CheckLeader(tc, t)

@@ -25,6 +25,7 @@ type Server struct {
 	wg       sync.WaitGroup
 }
 
+// NewServer instantiates a new Server. the server can be then run using Run()
 func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, clientCh chan<- Commit) *Server {
 	s := new(Server)
 	s.id = id
@@ -37,6 +38,8 @@ func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, c
 	return s
 }
 
+// Run starts a new RPC server, which begins listening for requests
+// s.wg can used to halt execution and start all servers simultaneously
 func (s *Server) Run() {
 	s.rf.mu.Lock()
 
@@ -76,6 +79,7 @@ func (s *Server) Run() {
 	}()
 }
 
+// GetListenAddr returns listener address for this server
 func (s *Server) GetListenAddr() net.Addr {
 	s.rf.mu.Lock()
 	defer s.rf.mu.Unlock()
@@ -132,7 +136,7 @@ func (s *Server) Kill() {
 	s.wg.Wait()
 }
 
-
+// Call makes an RPC call to Raft peer identified by id
 func (s *Server) Call(id int, method string, args interface{}, reply interface{}) error {
 	s.rf.mu.Lock()
 	peer := s.peers[id]
@@ -146,7 +150,7 @@ func (s *Server) Call(id int, method string, args interface{}, reply interface{}
 }
 
 
-
+// Cluster simulates a server cluster. it is used exclusively for testing
 type Cluster struct {
 	mu        sync.Mutex
 	cluster   []*Server
@@ -159,9 +163,9 @@ type Cluster struct {
 	n         int
 }
 
-// NewTestCluster creates a new test Cluster, initialized with n servers connected
+// NewCluster creates a new Cluster, initialized with n servers connected
 // to each other
-func NewTestCluster(storages []Storage, n int) *Cluster {
+func NewCluster(storages []Storage, n int) *Cluster {
 	servers := make([]*Server, n)
 	connected := make([]bool, n)
 	alive := make([]bool, n)
