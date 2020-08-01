@@ -3,7 +3,6 @@ package raft
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/rpc"
 	"sync"
@@ -11,7 +10,6 @@ import (
 
 type Server struct {
 	id     int
-	client uint64 // identifies client being served
 
 	rf      *Raft
 	storage Storage
@@ -30,7 +28,6 @@ type Server struct {
 func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, clientCh chan<- Commit) *Server {
 	s := new(Server)
 	s.id = id
-	s.client = rand.Uint64()
 	s.peers = make(map[int]*rpc.Client)
 	s.storage = storage
 	s.ready = ready

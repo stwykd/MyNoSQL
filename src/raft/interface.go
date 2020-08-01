@@ -15,10 +15,10 @@ type AppendEntriesArgs struct {
 	Term   int // leader's term
 	Leader int // so that followers can redirect peers to leader
 
-	PrevLogIndex int // index log index of log entry immediately preceding new ones
-	PrevLogTerm  int // term of prevLogIndex entry
+	PrevLogIndex int        // index of the log entry immediately preceding new ones
+	PrevLogTerm  int        // term of prevLogIndex entry
 	Entries      []LogEntry // log entries to store (empty for heartbeat; may send more than one for efficiency)
-	LeaderCommit int // leader’s commitIndex
+	LeaderCommit int        // leader’s commitIndex
 }
 
 // AppendEntriesReply results from AppendEntry() RPC
@@ -44,6 +44,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		log.Printf("[%v] currentTerm=%d out of date with AppendEntriesArgs.Term=%d",
 			rf.me, rf.currentTerm, args.Term)
 		rf.toFollower(args.Term)
+		rf.leader = args.Leader
 	}
 
 	reply.Success = false
@@ -52,6 +53,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		// leader already exists in this term
 		if rf.state != Follower {
 			rf.toFollower(args.Term)
+			rf.leader = args.Leader
 		}
 		rf.resetElection = time.Now()
 
@@ -145,7 +147,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 	if rf.state == Down {
 		return nil
 	}
-	lastLogIdx, lastLogTerm := rf.lastLogIndexAndTerm()
+	lastLogIdx, lastLogTerm := rf.lastLogIdxAndTerm()
 	log.Printf("[%v] received RequestVote RPC: %+v [currentTerm=%d votedFor=%d lastLogIdx=%d lastLogTerm=%d]",
 		rf.me, args, rf.currentTerm, rf.votedFor, lastLogIdx, lastLogTerm)
 	if args.Term > rf.currentTerm {

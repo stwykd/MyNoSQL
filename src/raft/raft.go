@@ -56,6 +56,7 @@ type Raft struct {
 	mu            sync.Mutex // mutex to protect shared access and ensure visibility
 	RPCServer                // handles RPC communication to Raft peers
 	server        *Server
+	leader 		  int
 	state         State      // state of this Raft server
 	logIndex      int        // log index where to store next log entry
 	resetElection time.Time  // time to wait before starting election. used by followers
@@ -186,7 +187,7 @@ func (rf *Raft) election() {
 			rf.mu.Unlock()
 
 			args := RequestVoteArgs{
-				Term:      savedCurrentTerm,
+				Term:         savedCurrentTerm,
 				LastLogIndex: lastLogIndex,
 				LastLogTerm:  lastLogTerm,
 			}
@@ -233,15 +234,6 @@ func (rf *Raft) election() {
 
 	// wait to start another election
 	go rf.electionWait()
-}
-
-func (rf *Raft) lastLogIdxAndTerm() (int, int) {
-	if len(rf.log) > 0 {
-		lastLogIndex := len(rf.log) - 1
-		return lastLogIndex, rf.log[lastLogIndex].Term
-	} else {
-		return -1, -1
-	}
 }
 
 // electionTimeout generates a pseudo-random election timeout duration.
@@ -360,10 +352,10 @@ func (rf *Raft) heartbeat() {
 	}
 }
 
-func (rf *Raft) lastLogIndexAndTerm() (int, int) {
-	if len(rf.log) > 0 {
-		lastIndex := len(rf.log) - 1
-		return lastIndex, rf.log[lastIndex].Term
+func (rf *Raft) lastLogIdxAndTerm() (int, int) {
+	if len(rf.log) > 0 { // log starts at 1
+		lastIdx := len(rf.log) - 1
+		return lastIdx, rf.log[lastIdx].Term
 	} else {
 		return -1, -1
 	}
@@ -398,6 +390,7 @@ func (rf *Raft) notifyClient() {
 // Expects rf.mu to be locked
 func (rf *Raft) toLeader() {
 	rf.state = Leader
+	rf.leader = rf.me
 
 	for _, peerId := range rf.peers {
 		rf.nextIndex[peerId] = len(rf.log)
