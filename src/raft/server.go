@@ -8,33 +8,31 @@ import (
 	"sync"
 )
 
+// Server serves and sends RPC requests for a Raft instance
 type Server struct {
-	id     int
-
+	id int
 	rf      *Raft
 	storage Storage
-
 	server   *rpc.Server
 	listener net.Listener
-
-	clientCh chan<- Commit
+	commitCh chan<- Commit
 	peers    map[int]*rpc.Client
-
 	ready    <-chan interface{}
 	quit     chan interface{}
 	wg       sync.WaitGroup
+	data     map[string]string // store Key-Value pair
 }
 
 // NewServer instantiates a new Server. the server can be then run using Run()
-func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, clientCh chan<- Commit) *Server {
+func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, commitCh chan<- Commit) *Server {
 	s := new(Server)
 	s.id = id
 	s.peers = make(map[int]*rpc.Client)
 	s.storage = storage
 	s.ready = ready
-	s.clientCh = clientCh
+	s.commitCh = commitCh
 	s.quit = make(chan interface{})
-	s.rf = NewRaft(s.id, peers, s, s.storage, s.ready, s.clientCh)
+	s.rf = NewRaft(s.id, peers, s, s.storage, s.ready, s.commitCh)
 	return s
 }
 
@@ -148,6 +146,48 @@ func (s *Server) Call(id int, method string, args interface{}, reply interface{}
 		return peer.Call(method, args, reply)
 	}
 }
+
+func (s *Server) Get(args GetArgs) GetReply {
+	if !s.rf.Replicate(args) {
+		return GetReply{ErrWrongLeader, ""}
+	}
+
+	var reply GetReply
+	if s.rf.leader != s.rf.me { // only leader receives client requests
+		if err := s.Call(s.rf.leader, "Server.Get", args, reply); err != nil {
+			log.Fatalf("error during Server.Get RPC: %s", err.Error())
+		}
+	} else {
+		reply.Value=s.data[args.Key]
+		reply.Err="OK"
+	}
+	return reply
+}
+
+// TODO Replay log when leader changes to have consistent s.data after crash
+func (s *Server) Put(args PutArgs) PutReply {
+	if !s.rf.Replicate(args) {
+		return PutReply{ErrWrongLeader}
+	}
+
+	var reply PutReply
+	if s.rf.leader != s.rf.me {
+		if err := s.Call(s.rf.leader, "Server.Get", args, reply); err != nil {
+			log.Fatalf("error during Server.Get RPC: %s", err.Error())
+		}
+	} else {
+		s.data[args.Key] = args.Value
+		reply.Err="OK"
+	}
+	return reply
+}
+
+
+
+
+
+
+
 
 
 // Cluster simulates a server cluster. it is used exclusively for testing

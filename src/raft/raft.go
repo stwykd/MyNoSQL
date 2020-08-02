@@ -37,7 +37,7 @@ const (
 	Down            = "down" // for testing
 )
 
-// Commit is used to clientCh the client that a command was replicated by
+// Commit is used to commitCh the client that a command was replicated by
 // a majority (ie it was committed) and it can now be applied by client
 type Commit struct {
 	Index   int // log index
@@ -62,8 +62,8 @@ type Raft struct {
 	resetElection time.Time  // time to wait before starting election. used by followers
 	peers         []int      // Raft peers (not including this server)
 
-	clientCh chan <-Commit   // notify the client app when commands are committed
-	readyCh  chan struct{}   // Use to signal when new entries are ready to be sent to client
+	commitCh chan <-Commit // used to notify when commands are committed
+	readyCh  chan struct{} // used to signal when new entries are ready to be sent to the client
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -85,13 +85,13 @@ type Raft struct {
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, clientCh chan <-Commit) *Raft {
+func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, commitCh chan <-Commit) *Raft {
 	rf := new(Raft)
 	rf.me = id
 	rf.peers = peerIds
 	rf.server = server
 	rf.storage = storage
-	rf.clientCh = clientCh
+	rf.commitCh = commitCh
 	rf.readyCh = make(chan struct{}, 16)
 	rf.updated = make(chan struct{}, 1)
 	rf.state = Follower
@@ -378,7 +378,7 @@ func (rf *Raft) notifyClient() {
 		log.Printf("[%v] notifying client of new entries %+v, lastApplied %d", rf.me, entries, lastApplied)
 
 		for i, e := range entries {
-			rf.clientCh <- Commit{lastApplied + i + 1, term, e.Command}
+			rf.commitCh <- Commit{lastApplied + i + 1, term, e.Command}
 		}
 	}
 	log.Printf("[%v] client notified", rf.me)
@@ -441,7 +441,7 @@ func (rf *Raft) toLeader() {
 
 // Replicate is called by client on the leader to append a new command
 // to the leader's log. the leader will then replicate it to its peers.
-// once the command is committed, the leader will use clientCh to notify
+// once the command is committed, the leader will use commitCh to notify
 // the client
 func (rf *Raft) Replicate(cmd interface{}) bool {
 	rf.mu.Lock()
@@ -458,8 +458,4 @@ func (rf *Raft) Replicate(cmd interface{}) bool {
 
 	rf.mu.Unlock()
 	return false
-}
-
-func (rf *Raft) isLeader() bool {
-	return rf.state == Leader
 }

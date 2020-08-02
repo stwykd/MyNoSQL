@@ -10,13 +10,18 @@ import (
 var RetryInterval = 1 * time.Second
 var retries       = 3
 
+const (
+	OK             = "OK"
+	ErrWrongLeader = "ErrWrongLeader"
+)
+
 type PutArgs struct {
 	Key        string
 	Value      string
 }
 
 type PutReply struct {
-	Success bool
+	Err string
 }
 
 type GetArgs struct {
@@ -24,21 +29,19 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Success bool
+	Err string
 	Value 	string
 }
 
 // Client of the key-value datastore
 type Client struct {
-	client  uint64 // client id
+	client   uint64 // client id
 	server  *rpc.Client
-	raftCh  <-chan Commit // raftCh notifies client when a command is committed
 }
 
-func (c *Client) Client(server *rpc.Client, raftCh <-chan Commit) {
+func (c *Client) Client(server *rpc.Client) {
 	c.client = rand.Uint64()
 	c.server=server
-	c.raftCh=raftCh
 }
 
 func (c *Client) Get(k string) string {
@@ -46,9 +49,6 @@ func (c *Client) Get(k string) string {
 		var reply GetReply
 		if err := c.server.Call("Server.Get", GetArgs{k}, reply); err != nil {
 			log.Fatalf("error while calling Server.Get RPC: %s", err.Error())
-		}
-		if reply.Success {
-			return reply.Value
 		}
 		time.Sleep(RetryInterval)
 	}
@@ -60,9 +60,6 @@ func (c *Client) Put(k, v string) bool {
 		var reply PutReply
 		if err := c.server.Call("Server.Put", PutArgs{k, v}, reply); err != nil {
 			log.Fatalf("error while calling Server.Put RPC: %s", err.Error())
-		}
-		if reply.Success {
-			return true
 		}
 		time.Sleep(RetryInterval)
 	}
