@@ -21,7 +21,7 @@ type PutArgs struct {
 }
 
 type PutReply struct {
-	Err string
+	Success bool
 }
 
 type GetArgs struct {
@@ -29,7 +29,7 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Err string
+	Success bool
 	Value 	string
 }
 

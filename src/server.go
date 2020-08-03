@@ -149,7 +149,7 @@ func (s *Server) Call(id int, method string, args interface{}, reply interface{}
 
 func (s *Server) Get(args GetArgs) GetReply {
 	if !s.rf.Replicate(args) {
-		return GetReply{ErrWrongLeader, ""}
+		return GetReply{false, ""}
 	}
 
 	var reply GetReply
@@ -159,7 +159,7 @@ func (s *Server) Get(args GetArgs) GetReply {
 		}
 	} else {
 		reply.Value=s.data[args.Key]
-		reply.Err="OK"
+		reply.Success=true
 	}
 	return reply
 }
@@ -167,7 +167,7 @@ func (s *Server) Get(args GetArgs) GetReply {
 // TODO Replay log when leader changes to have consistent s.data after crash
 func (s *Server) Put(args PutArgs) PutReply {
 	if !s.rf.Replicate(args) {
-		return PutReply{ErrWrongLeader}
+		return PutReply{false}
 	}
 
 	var reply PutReply
@@ -177,7 +177,7 @@ func (s *Server) Put(args PutArgs) PutReply {
 		}
 	} else {
 		s.data[args.Key] = args.Value
-		reply.Err="OK"
+		reply.Success=true
 	}
 	return reply
 }
