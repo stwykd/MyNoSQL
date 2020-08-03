@@ -1,4 +1,4 @@
-package raft
+package src
 
 import (
 	"fmt"
@@ -10,9 +10,9 @@ import (
 
 // Server serves and sends RPC requests for a Raft instance
 type Server struct {
-	id int
-	rf      *Raft
-	storage Storage
+	id       int
+	rf       *Raft
+	storage  Storage
 	server   *rpc.Server
 	listener net.Listener
 	commitCh chan<- Commit

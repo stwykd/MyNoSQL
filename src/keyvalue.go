@@ -1,4 +1,4 @@
-package raft
+package src
 
 import (
 	"log"
@@ -45,7 +45,7 @@ func (c *Client) Client(server *rpc.Client) {
 }
 
 func (c *Client) Get(k string) string {
-	for r:=0; r<retries; r++ {
+	for r:=0; r< retries; r++ {
 		var reply GetReply
 		if err := c.server.Call("Server.Get", GetArgs{k}, reply); err != nil {
 			log.Fatalf("error while calling Server.Get RPC: %s", err.Error())
@@ -56,7 +56,7 @@ func (c *Client) Get(k string) string {
 }
 
 func (c *Client) Put(k, v string) bool {
-	for r:=0; r<retries; r++ {
+	for r:=0; r< retries; r++ {
 		var reply PutReply
 		if err := c.server.Call("Server.Put", PutArgs{k, v}, reply); err != nil {
 			log.Fatalf("error while calling Server.Put RPC: %s", err.Error())

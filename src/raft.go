@@ -1,4 +1,4 @@
-package raft
+package src
 
 import (
 	"log"
@@ -56,14 +56,14 @@ type Raft struct {
 	mu            sync.Mutex // mutex to protect shared access and ensure visibility
 	RPCServer                // handles RPC communication to Raft peers
 	server        *Server
-	leader 		  int
-	state         State      // state of this Raft server
-	logIndex      int        // log index where to store next log entry
-	resetElection time.Time  // time to wait before starting election. used by followers
-	peers         []int      // Raft peers (not including this server)
+	leader        int
+	state         State     // state of this Raft server
+	logIndex      int       // log index where to store next log entry
+	resetElection time.Time // time to wait before starting election. used by followers
+	peers         []int     // Raft peers (not including this server)
 
-	commitCh chan <-Commit // used to notify when commands are committed
-	readyCh  chan struct{} // used to signal when new entries are ready to be sent to the client
+	commitCh chan <- Commit // used to notify when commands are committed
+	readyCh  chan struct{}  // used to signal when new entries are ready to be sent to the client
 
 	// State from Figure 2 of Raft paper
 	// Persistent state on all servers
@@ -80,12 +80,12 @@ type Raft struct {
 	nextIndex  map[int]int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
 	matchIndex map[int]int // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 
-	storage Storage // storage is an interface for disk storage used to persist Raft state. it simplifies testing
+	storage Storage       // storage is an interface for disk storage used to persist Raft state. it simplifies testing
 	updated chan struct{} // updated is used by leaders in heartbeat() to know when the internal state changes
 }
 
 // NewRaft initializes a new Raft server as of Figure 2 of Raft paper
-func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, commitCh chan <-Commit) *Raft {
+func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, commitCh chan <- Commit) *Raft {
 	rf := new(Raft)
 	rf.me = id
 	rf.peers = peerIds

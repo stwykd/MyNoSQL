@@ -1,4 +1,4 @@
-package raft
+package src
 
 import (
 	"bytes"
@@ -98,7 +98,7 @@ func (ms *TestStorage) Ready() bool {
 	return len(ms.st) > 0
 }
 
-func getNTestStorage(n int) []Storage  {
+func getNTestStorage(n int) []Storage {
 	storage := make([]Storage, n)
 	for i:=0; i<n; i++ {
 		storage[i] = NewTestStorage()
