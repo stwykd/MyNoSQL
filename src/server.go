@@ -174,6 +174,7 @@ func (s *Server) Get(args GetArgs, reply *GetReply) error {
 
 // TODO Replay log when leader changes to have consistent s.data after crash
 func (s *Server) Put(args PutArgs, reply *PutReply) error {
+	log.Printf("[%d] received Put RPC: %s->%s", s.rf.me, args.Key, args.Value)
 	if leader := s.rf.Replicate(args.Key+" "+args.Value); !leader { // gob.Encode(args)
 		reply.Success = false
 		return nil
@@ -312,4 +313,21 @@ func (tc *Cluster) listenCommits(id int) {
 		tc.commits[id] = append(tc.commits[id], c)
 		tc.mu.Unlock()
 	}
+}
+
+func (tc *Cluster) connectToServers() []*rpc.Client {
+	servers := make([]*rpc.Client, len(tc.servers))
+	for _, server := range tc.cluster {
+		go server.server.Accept(server.listener)
+	}
+	for _, server := range tc.cluster {
+		addr := server.GetListenAddr()
+		if client, err := rpc.Dial(addr.Network(), addr.String()); err != nil {
+			log.Fatalf("error while dialing server: %s", err.Error())
+		} else {
+			servers=append(servers, client)
+		}
+	}
+
+	return servers
 }
