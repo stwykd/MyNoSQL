@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// RPC interface exposed by each Raft server
+// RPC interface exposed by each Raft rfServer
 // See Figure 2 of Raft paper
 // RPC calls can take a long while to arrive - when replying, the code may have moved on
 // and it's important to gracefully give up in such cases.
@@ -49,7 +49,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 	reply.Success = false
 	if args.Term == rf.currentTerm {
-		// two leaders can't coexist. if Raft server receives AppendEntries() RPC, another
+		// two leaders can't coexist. if Raft rfServer receives AppendEntries() RPC, another
 		// leader already exists in this term
 		if rf.state != Follower {
 			rf.toFollower(args.Term)
@@ -151,7 +151,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 	log.Printf("[%v] received RequestVote RPC: %+v [currentTerm=%d votedFor=%d lastLogIdx=%d lastLogTerm=%d]",
 		rf.me, args, rf.currentTerm, rf.votedFor, lastLogIdx, lastLogTerm)
 	if args.Term > rf.currentTerm {
-		// Raft server in past term, revert to follower (and reset its state)
+		// Raft rfServer in past term, revert to follower (and reset its state)
 		log.Printf("[%v] RequestVoteArgs.Term=%d bigger than currentTerm=%d",
 			rf.me, args.Term, rf.currentTerm)
 		rf.toFollower(args.Term)

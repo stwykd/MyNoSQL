@@ -20,7 +20,7 @@ func init() {
 
 const HeartbeatInterval = 50 * time.Millisecond
 
-// LogEntry is a single entry in a Raft server's log
+// LogEntry is a single entry in a Raft rfServer's log
 type LogEntry struct {
 	Index   int
 	Term    int
@@ -53,7 +53,7 @@ type RPCServer struct {
 
 type Raft struct {
 	me            int        // id of this Raft server
-	mu            sync.Mutex // mutex to protect shared access and ensure visibility
+	mu            sync.Mutex // protect shared access and ensure visibility
 	RPCServer                // handles RPC communication to Raft peers
 	server        *Server
 	leader        int
@@ -84,7 +84,7 @@ type Raft struct {
 	updated chan struct{} // updated is used by leaders in heartbeat() to know when the internal state changes
 }
 
-// NewRaft initializes a new Raft server as of Figure 2 of Raft paper
+// NewRaft initializes a new Raft rfServer as of Figure 2 of Raft paper
 func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-chan interface{}, commitCh chan <- Commit) *Raft {
 	rf := new(Raft)
 	rf.me = id
@@ -117,7 +117,7 @@ func NewRaft(id int, peerIds []int, server *Server, storage Storage, ready <-cha
 	return rf
 }
 
-// Stop stops this Raft server
+// Stop stops this Raft rfServer
 func (rf *Raft) Stop() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -126,7 +126,7 @@ func (rf *Raft) Stop() {
 	close(rf.readyCh)
 }
 
-// range suggested in paper
+// wait range that paper suggests
 const minElectionWait, maxElectionWait = 150, 300
 
 // electionWait starts a timer towards becoming a candidate in a new election.
@@ -143,7 +143,7 @@ func (rf *Raft) electionWait() {
 	for {
 		<-ticker.C
 		rf.mu.Lock()
-		// election() running concurrently. server may be a candidate or even a leader already
+		// election() running concurrently. rfServer may be a candidate or even a leader already
 		if rf.state != Candidate && rf.state != Follower {
 			log.Printf("[%v] waiting for election with state=%v instead of follower, return",
 				rf.me, rf.state)
