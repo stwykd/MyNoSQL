@@ -13,17 +13,18 @@ type Server struct {
 	id       int
 	rf       *Raft
 	storage  Storage
-	server   *rpc.Server
+	rfServer *rpc.Server // listens for Raft RPC requests from peers
 	listener net.Listener
 	commitCh chan<- Commit
 	peers    map[int]*rpc.Client
 	ready    <-chan interface{}
 	quit     chan interface{}
 	wg       sync.WaitGroup
+	server   *rpc.Server // listens for Server RPC requests from client app
 	data     map[string]string // store Key-Value pair
 }
 
-// NewServer instantiates a new Server. the server can be then run using Run()
+// NewServer instantiates a new Server. the rfServer can be then run using Run()
 func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, commitCh chan<- Commit) *Server {
 	s := new(Server)
 	s.id = id
@@ -33,16 +34,22 @@ func NewServer(id int, peers []int, storage Storage, ready <-chan interface{}, c
 	s.commitCh = commitCh
 	s.quit = make(chan interface{})
 	s.rf = NewRaft(s.id, peers, s, s.storage, s.ready, s.commitCh)
+	s.data = make(map[string]string)
 	return s
 }
 
-// Run starts a new RPC server, which begins listening for requests
+// Run starts a new RPC rfServer, which begins listening for requests
 // s.wg can used to halt execution and start all servers simultaneously
 func (s *Server) Run() {
 	s.rf.mu.Lock()
 
+	s.rfServer = rpc.NewServer()
+	if err := s.rfServer.RegisterName("Raft", s.rf); err != nil {
+		log.Fatal(err)
+	}
+
 	s.server = rpc.NewServer()
-	if err := s.server.RegisterName("Raft", s.rf); err != nil {
+	if err := s.rfServer.RegisterName("Server", s); err != nil {
 		log.Fatal(err)
 	}
 
@@ -57,7 +64,6 @@ func (s *Server) Run() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-
 		for {
 			conn, err := s.listener.Accept()
 			if err != nil {
@@ -70,21 +76,21 @@ func (s *Server) Run() {
 			}
 			s.wg.Add(1)
 			go func() {
-				s.server.ServeConn(conn)
+				s.rfServer.ServeConn(conn)
 				s.wg.Done()
 			}()
 		}
 	}()
 }
 
-// GetListenAddr returns listener address for this server
+// GetListenAddr returns listener address for this rfServer
 func (s *Server) GetListenAddr() net.Addr {
 	s.rf.mu.Lock()
 	defer s.rf.mu.Unlock()
 	return s.listener.Addr()
 }
 
-// Connect connects test server to RPC client with id `id`
+// Connect connects test rfServer to RPC client with id `id`
 // requires mu to be acquired
 func (s *Server) Connect(peer int, addr net.Addr) error {
 	s.rf.mu.Lock()
@@ -99,7 +105,7 @@ func (s *Server) Connect(peer int, addr net.Addr) error {
 	return nil
 }
 
-// Disconnect disconnects RPC client with id `id` from test server
+// Disconnect disconnects RPC client with id `id` from test rfServer
 // requires mu to be acquired
 func (s *Server) Disconnect(peer int) error {
 	s.rf.mu.Lock()
@@ -147,39 +153,36 @@ func (s *Server) Call(id int, method string, args interface{}, reply interface{}
 	}
 }
 
-func (s *Server) Get(args GetArgs) GetReply {
-	if !s.rf.Replicate(args) {
-		return GetReply{false, ""}
+
+
+func (s *Server) Get(args GetArgs, reply *GetReply) error {
+	if leader := s.rf.Replicate(args.Key); !leader {
+		reply.Success=false
+		return nil
 	}
 
-	var reply GetReply
-	if s.rf.leader != s.rf.me { // only leader receives client requests
+	if s.rf.leader != s.rf.me { // only leader should receives client requests
 		if err := s.Call(s.rf.leader, "Server.Get", args, reply); err != nil {
-			log.Fatalf("error during Server.Get RPC: %s", err.Error())
+			return err
 		}
 	} else {
 		reply.Value=s.data[args.Key]
 		reply.Success=true
 	}
-	return reply
+	return nil
 }
 
 // TODO Replay log when leader changes to have consistent s.data after crash
-func (s *Server) Put(args PutArgs) PutReply {
-	if !s.rf.Replicate(args) {
-		return PutReply{false}
+func (s *Server) Put(args PutArgs, reply *PutReply) error {
+	if leader := s.rf.Replicate(args.Key+" "+args.Value); !leader { // gob.Encode(args)
+		reply.Success = false
+		return nil
 	}
 
-	var reply PutReply
-	if s.rf.leader != s.rf.me {
-		if err := s.Call(s.rf.leader, "Server.Get", args, reply); err != nil {
-			log.Fatalf("error during Server.Get RPC: %s", err.Error())
-		}
-	} else {
-		s.data[args.Key] = args.Value
-		reply.Success=true
-	}
-	return reply
+	s.data[args.Key] = args.Value
+	reply.Success=true
+
+	return nil
 }
 
 
@@ -190,13 +193,13 @@ func (s *Server) Put(args PutArgs) PutReply {
 
 
 
-// Cluster simulates a server cluster. it is used exclusively for testing
+// Cluster simulates a rfServer cluster. it is used exclusively for testing
 type Cluster struct {
 	mu        sync.Mutex
 	cluster   []*Server
 	servers   []*rpc.Server
 	storage   []Storage
-	clientChs []chan Commit
+	commitChs []chan Commit
 	commits   [][]Commit
 	connected []bool
 	alive     []bool
@@ -244,14 +247,14 @@ func NewCluster(storages []Storage, n int) *Cluster {
 	tc := &Cluster{
 		cluster:   servers,
 		storage:   storage,
-		clientChs: clientChs,
+		commitChs: clientChs,
 		commits:   commits,
 		connected: connected,
 		alive:     alive,
 		n:         n,
 	}
 	for i := 0; i < n; i++ {
-		go tc.clientCommits(i)
+		go tc.listenCommits(i)
 	}
 	return tc
 }
@@ -270,11 +273,11 @@ func (tc *Cluster) KillCluster() {
 		}
 	}
 	for id := 0; id < tc.n; id++ {
-		close(tc.clientChs[id])
+		close(tc.commitChs[id])
 	}
 }
 
-// Disconnect disconnects a server from all other servers in the cluster
+// Disconnect disconnects a rfServer from all other servers in the cluster
 func (tc *Cluster) Disconnect(id int) {
 	tc.cluster[id].DisconnectPeers()
 	for j := 0; j < tc.n; j++ {
@@ -287,7 +290,7 @@ func (tc *Cluster) Disconnect(id int) {
 	tc.connected[id] = false
 }
 
-// Connect connects a server to all other servers in the cluster
+// Connect connects a rfServer to all other servers in the cluster
 func (tc *Cluster) Connect(id int) {
 	for j := 0; j < tc.n; j++ {
 		if j != id && tc.alive[j] {
@@ -302,9 +305,9 @@ func (tc *Cluster) Connect(id int) {
 	tc.connected[id] = true
 }
 
-func (tc *Cluster) clientCommits(id int) {
+func (tc *Cluster) listenCommits(id int) {
 	log.Printf("[%v] start listening for commits", tc.cluster[id].rf.me)
-	for c := range tc.clientChs[id] {
+	for c := range tc.commitChs[id] {
 		tc.mu.Lock()
 		tc.commits[id] = append(tc.commits[id], c)
 		tc.mu.Unlock()

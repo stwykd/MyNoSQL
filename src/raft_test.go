@@ -583,7 +583,7 @@ func CheckLeader(tc *Cluster, t *testing.T) (int, int) {
 	return -1, -1
 }
 
-// NoQuorum checks that no connected server considers itself the leader.
+// NoQuorum checks that no connected rfServer considers itself the leader.
 func NoQuorum(tc *Cluster, t *testing.T) {
 	for id := 0; id < tc.n; id++ {
 		if tc.connected[id] {
@@ -637,7 +637,7 @@ func Committed(tc *Cluster, t *testing.T, cmd int) (nc int, index int) {
 				if tc.connected[i] {
 					gotIdx := tc.commits[i][c].Index
 					if expIdx >= 0 && gotIdx != expIdx {
-						t.Errorf("server %d committed idx %d for cmd %d whilst server %d committed idx %d"+
+						t.Errorf("rfServer %d committed idx %d for cmd %d whilst rfServer %d committed idx %d"+
 							" for the same cmd", 0, expIdx, cmd, i, gotIdx)
 					} else {
 						expIdx = tc.commits[i][c].Index
@@ -660,7 +660,7 @@ func CommittedN(tc *Cluster, t *testing.T, cmd int, n int) {
 	}
 }
 
-// NotCommitted verifies that cmd was not committed by any cluster server
+// NotCommitted verifies that cmd was not committed by any cluster rfServer
 func NotCommitted(tc *Cluster, t *testing.T, cmd int) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
@@ -683,9 +683,9 @@ func Replicate(tc *Cluster, t *testing.T, id int, cmd interface{}) bool {
 
 // == Persist ==
 
-// Crash crashes a server, however it's state is expected to be persisted
+// Crash crashes a rfServer, however it's state is expected to be persisted
 func Crash(tc *Cluster, t *testing.T, id int) {
-	log.Printf("[%v] server crashing", id)
+	log.Printf("[%v] rfServer crashing", id)
 	tc.Disconnect(id)
 	tc.alive[id] = false
 	tc.cluster[id].Kill()
@@ -695,12 +695,12 @@ func Crash(tc *Cluster, t *testing.T, id int) {
 	tc.mu.Unlock()
 }
 
-// Restart restarts previously crashed server
+// Restart restarts previously crashed rfServer
 func Restart(tc *Cluster, t *testing.T, id int) {
 	if tc.alive[id] {
 		log.Fatalf("me=%d is alive in Restart", id)
 	}
-	log.Printf("[%v] server starting", id)
+	log.Printf("[%v] rfServer starting", id)
 
 	peerIds := make([]int, 0)
 	for p := 0; p < tc.n; p++ {
@@ -710,7 +710,7 @@ func Restart(tc *Cluster, t *testing.T, id int) {
 	}
 
 	ready := make(chan interface{})
-	tc.cluster[id] = NewServer(id, peerIds, tc.storage[id], ready, tc.clientChs[id])
+	tc.cluster[id] = NewServer(id, peerIds, tc.storage[id], ready, tc.commitChs[id])
 	tc.cluster[id].Run()
 	tc.Connect(id)
 	close(ready)

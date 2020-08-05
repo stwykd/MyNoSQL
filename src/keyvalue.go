@@ -3,6 +3,7 @@ package src
 import (
 	"log"
 	"math/rand"
+	"net"
 	"net/rpc"
 	"time"
 )
@@ -39,16 +40,28 @@ type Client struct {
 	server  *rpc.Client
 }
 
-func (c *Client) Client(server *rpc.Client) {
+func NewClient() *Client {
+	c := new(Client)
 	c.client = rand.Uint64()
-	c.server=server
+	return c
+}
+
+func (c *Client) Connect(addr net.Addr) {
+	server, err := rpc.Dial(addr.Network(), addr.String())
+	if err != nil {
+		log.Fatalf("error dialing server: %s", err)
+	}
+	c.server = server
 }
 
 func (c *Client) Get(k string) string {
+	var reply GetReply
 	for r:=0; r< retries; r++ {
-		var reply GetReply
-		if err := c.server.Call("Server.Get", GetArgs{k}, reply); err != nil {
+		if err := c.server.Call("Server.Get", GetArgs{k}, &reply); err != nil {
 			log.Fatalf("error while calling Server.Get RPC: %s", err.Error())
+		}
+		if reply.Success {
+			return reply.Value
 		}
 		time.Sleep(RetryInterval)
 	}
@@ -56,10 +69,13 @@ func (c *Client) Get(k string) string {
 }
 
 func (c *Client) Put(k, v string) bool {
+	var reply PutReply
 	for r:=0; r< retries; r++ {
-		var reply PutReply
-		if err := c.server.Call("Server.Put", PutArgs{k, v}, reply); err != nil {
+		if err := c.server.Call("Server.Put", PutArgs{k, v}, &reply); err != nil {
 			log.Fatalf("error while calling Server.Put RPC: %s", err.Error())
+		}
+		if reply.Success {
+			return true
 		}
 		time.Sleep(RetryInterval)
 	}
