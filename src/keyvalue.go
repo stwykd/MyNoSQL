@@ -6,11 +6,6 @@ import (
 	"net/rpc"
 )
 
-const (
-	OK             = "OK"
-	ErrWrongLeader = "ErrWrongLeader"
-)
-
 type PutArgs struct {
 	Key        string
 	Value      string
